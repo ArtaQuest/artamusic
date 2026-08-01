@@ -1,13 +1,17 @@
-v2 (2026-08-01) — the triple-check revision, applied by the review's own lyric surgeon.
-Changes from v1 (as sung by takes t1-t4):
-  - HOOK: "Unbroken, hold the line" -> "Never broken, hold the line" at all 8 occurrences.
-    Rationale (confirmed by an adversarial verifier): an unstressed "un-" pickup is the same
-    error class that re-voted "I got able" into "I got eight"; a stressed line-initial "NEV-er"
-    cannot be swallowed without deleting a stressed syllable. The TITLE stays "Unbroken".
-    DECISION GATE: this change is provisional until the next run's takes are machine-transcribed
-    and the hook survives — the same evidence bar every other singability rule met.
-  - VERSE 2 rebuilt into four true couplets: away/hate, bill/will, jaw/saw, ladder/hammer
-    (keys -> ladder, letter -> notice). "call it hammer" stays section-final; spine untouched.
+v2 (2026-08-01) — verse 2 rebuilt from a confirmed triple-check finding; hook UNCHANGED.
+
+The review proposed "Never broken" on a mechanism argument (an unstressed "un-" pickup can be
+re-voted the way "I got able" became "I got eight"). The change was held PROVISIONAL pending
+machine-transcription of real takes — and the evidence came back against it: across t1/t3/t4,
+"unbroken" was heard cleanly 22 times with ONE inversion (t3), a ~4% noise rate, not a systematic
+failure. By this project's own bar — systemic means failing in every take — the hook stands as
+written. The mechanism was plausible; the measurement says no.
+
+What v2 does change (evidence-independent craft, confirmed): verse 2 rebuilt into four true
+couplets — away/hate (long-a slant), bill/will, jaw/saw, ladder/hammer (the reference's own
+harder/armor feminine-slant shape). keys -> ladder, letter -> notice (an eviction notice is
+sharper, and it kills the letter/ladder near-homophone). "call it hammer" stays section-final;
+the heat -> hammer -> quench -> edge spine is untouched and now machine-enforced.
 
 [verse]
 Cold house, thin coat, cracked door
@@ -31,9 +35,9 @@ Swing the hammer, call my name
 Every blow they meant to kill
 Beat the iron into steel
 Strike me hard and hear it ring
-Never broken, hold the line
+Unbroken, hold the line
 Swing again and hear it ring
-Never broken, hold the line
+Unbroken, hold the line
 
 [verse]
 Man I trusted walked away
@@ -57,9 +61,9 @@ Swing the hammer, call my name
 Every blow they meant to kill
 Beat the iron into steel
 Strike me hard and hear it ring
-Never broken, hold the line
+Unbroken, hold the line
 Swing again and hear it ring
-Never broken, hold the line
+Unbroken, hold the line
 
 [bridge]
 Some nights I sat down and cried
@@ -75,12 +79,12 @@ Swing the hammer, call my name
 Every blow they meant to kill
 Beat the iron into steel
 Strike me hard and hear it ring
-Never broken, hold the line
+Unbroken, hold the line
 Swing again and hear it ring
-Never broken, hold the line
+Unbroken, hold the line
 
 [outro]
 Bring it all now, call it edge
-Never broken, hold the line
+Unbroken, hold the line
 Bring it all now, call it edge
-Never broken, hold the line
+Unbroken, hold the line
