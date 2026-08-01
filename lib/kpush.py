@@ -31,6 +31,8 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("cmd", choices=["push", "status", "log"]); p.add_argument("slug")
     p.add_argument("--title"); p.add_argument("--py"); p.add_argument("--public", action="store_true")
+    p.add_argument("--kernel-source", action="append", default=[],
+                   help="mount another kernel's OUTPUT under /kaggle/input (must be public)")
     a = p.parse_args()
     if a.cmd == "push":
         f = HERE / f".push-{a.slug}"; f.mkdir(exist_ok=True)
@@ -39,7 +41,8 @@ if __name__ == "__main__":
             "id": f"{OWNER}/{a.slug}", "title": a.title or a.slug, "code_file": Path(nb).name,
             "language": "python", "kernel_type": "notebook", "is_private": not a.public,
             "enable_gpu": True, "enable_internet": True, "dataset_sources": [],
-            "competition_sources": [], "kernel_sources": [], "model_sources": []}, indent=2))
+            "competition_sources": [], "kernel_sources": a.kernel_source,
+            "model_sources": []}, indent=2))
         r = api().kernels_push(str(f), timeout=None, acc=None)
         print("error:", getattr(r, "error", None), "| url:", getattr(r, "url", None))
     elif a.cmd == "status":
