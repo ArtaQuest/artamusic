@@ -44,7 +44,9 @@ OUT = Path("/kaggle/working/out"); OUT.mkdir(parents=True, exist_ok=True)
 import glob as _glob
 _ref = sorted(_glob.glob("/kaggle/input/**/UNBROKEN.mp3", recursive=True))
 MALE_REF = _ref[0] if _ref else None
-print("male reference:", MALE_REF or "NOT FOUND — cover block will be skipped", flush=True)
+print("male reference:", MALE_REF or "NOT FOUND", flush=True)
+assert MALE_REF, ("the male reference is not mounted — this kernel is POINTLESS without it; "
+                  "fail loudly at second 5 rather than skip-complete at minute 40")
 os.environ.update(HF_HOME=str(TMP / "hf"), HF_HUB_ENABLE_HF_TRANSFER="1",
                   ACESTEP_CHECKPOINTS_DIR=str(CKPT), ACESTEP_PROJECT_ROOT=str(REPO),
                   # ACE-Step kills generation at 600 s by default. The 4.6B model LOADS
@@ -222,14 +224,12 @@ Unbroken, hold the line"""
 # came back female from male-explicit captions — which is why the register is MEASURED below and
 # a female take is discarded rather than shipped.
 TAKES = [
-    # Block 1 — cover conditioning on the verified-male reference (one variable: strength)
+    # Cover-only re-run: the solo block already rendered in v1 (s1-s3, fetched). This version
+    # exists because v1 went up without the kernel source mounted and the cover rows self-skipped
+    # exactly as designed — better a visible skip than a silent text2music fallback.
     ("c090", "cover", "trap, epic, male choir, baritone", "v1", 0.90, 60, 7.5, 6103),
     ("c060", "cover", "trap, epic, male choir, baritone", "v1", 0.60, 60, 7.5, 6103),
     ("c030", "cover", "trap, epic, male choir, baritone", "v1", 0.30, 60, 7.5, 6103),
-    # Block 2 — solo-voice caption lottery, v2 lyric (doubles as hook-transcription evidence)
-    ("s1", "text2music", "trap, cinematic, male rap",       "v2", None, 60, 7.5, 9101),
-    ("s2", "text2music", "trap, cinematic, male rap",       "v2", None, 60, 7.5, 9202),
-    ("s3", "text2music", "cinematic, orchestral, baritone", "v2", None, 60, 7.5, 9303),
 ]
 LYRICS_V2 = """[verse]
 Cold house, thin coat, cracked door
