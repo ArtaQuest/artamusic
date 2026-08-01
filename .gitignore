@@ -1,0 +1,13 @@
+# Outputs (audio, video, artwork) are deliberately not kept here. They are reproducible from the
+# public Kaggle kernels and delivered to the operator's local machine.
+*.mp3
+*.wav
+*.flac
+*.mp4
+*.png
+out/
+takes*/
+recovered/
+.push-*/
+__pycache__/
+venv/

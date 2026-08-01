@@ -1,0 +1,44 @@
+{
+  "song_xl": {
+    "repo": "ACE-Step/acestep-v15-xl-sft",
+    "revision": "d06de46b4622f781cf07f4a013a67d591ca52819",
+    "gated": false,
+    "downloads": 5885,
+    "likes": 90
+  },
+  "song_base": {
+    "repo": "ACE-Step/Ace-Step1.5",
+    "revision": "19671f406d603126926c1b7e2adc169acbcade22",
+    "gated": false,
+    "downloads": 60013,
+    "likes": 810
+  },
+  "image": {
+    "repo": "Qwen/Qwen-Image",
+    "revision": "75e0b4be04f60ec59a75f475837eced720f823b6",
+    "gated": false,
+    "downloads": 203888,
+    "likes": 2559
+  },
+  "image_alt": {
+    "repo": "black-forest-labs/FLUX.1-dev",
+    "revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "gated": "auto",
+    "downloads": 551655,
+    "likes": 13867
+  },
+  "video": {
+    "repo": "Wan-AI/Wan2.2-I2V-A14B",
+    "revision": "206a9ee1b7bfaaf8f7e4d81335650533490646a3",
+    "gated": false,
+    "downloads": 19654,
+    "likes": 760
+  },
+  "asr": {
+    "repo": "openai/whisper-large-v3",
+    "revision": "06f233fe06e710322aca913c1bc4249a0d71fce1",
+    "gated": false,
+    "downloads": 5783442,
+    "likes": 6010
+  }
+}
