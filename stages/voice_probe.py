@@ -355,7 +355,13 @@ def config_for(name, task, caption, lyr_key, strength, steps, cfg, seed):
          "use_cot_lyrics": False, "use_cot_language": False,
          "batch_size": 1, "use_random_seed": False, "seeds": [seed]}
     if task == "cover":
-        c["reference_audio"] = MALE_REF
+        # The cover task's input is SRC_AUDIO — the song being covered. reference_audio is a
+        # different lever (style transfer) and the CLI rejects a cover without src_audio outright:
+        # "cli.py: error: --src_audio is required for task_type 'cover'." Three takes died at arg
+        # validation learning this; the docs describe both fields without saying which task reads
+        # which. audio_cover_strength stays the probed variable (docs: "set smaller (0.2) for
+        # style transfer" — semantics for covers unstated, hence the sweep).
+        c["src_audio"] = MALE_REF
         c["audio_cover_strength"] = strength
     return c
 
