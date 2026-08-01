@@ -105,7 +105,12 @@ def loudness(path):
     peak = float(np.abs(st).max())
     return {"lufs": g("I:"), "lra_lu": g("LRA:"),
             "peak_dbfs": round(20*math.log10(peak+EPS),2),
-            "clipped": int((np.abs(st) >= 0.99999).sum())}
+            "true_peak_dbtp": g("Peak:"),
+            # s16's maximum positive sample is 32767/32768 = 0.9999695. The previous threshold
+            # (0.99999) sat ABOVE that, so positive clipping could never be counted — a meter that
+            # cannot fire is worse than no meter. 0.99996 sits safely below the s16 ceiling and
+            # above any musical sample that is not pinned to the rail.
+            "clipped": int((np.abs(st) >= 0.99996).sum())}
 
 
 def bands(x, sr, n=1<<15):
@@ -122,7 +127,12 @@ def tempo(x, sr):
     if len(x) < n*8: return {}
     idx = np.arange(1+(len(x)-n)//hop)[:,None]*hop + np.arange(n)[None,:]
     S = np.abs(np.fft.rfft(x[idx]*np.hanning(n),axis=1))
-    env = np.maximum(np.diff(np.log1p(S*100),axis=0),0).sum(1)
+    # LAG SEARCH ON THE KICK BAND ONLY (<150 Hz). Full-band flux hears the hats, and a dotted-
+    # eighth hat pattern over a 100 BPM kick reads as 133 — a 4:3 alias that nearly discarded a
+    # valid take. The kick carries the grid; the hats carry the subdivision.
+    fbins = np.fft.rfftfreq(n, 1/sr)
+    kick = S[:, fbins < 150]
+    env = np.maximum(np.diff(np.log1p(kick*100),axis=0),0).sum(1)
     env = np.concatenate([[0.0],(env-env.mean())/(env.std()+EPS)])
     ac = np.correlate(env-env.mean(), env-env.mean(), "full")[len(env)-1:]
     lags = np.arange(len(ac)); per = lags*hop/sr
@@ -133,6 +143,10 @@ def tempo(x, sr):
     # favours the slower reading. Caught by the self-test, which read 128 as 64.00.
     half = best//2
     if half >= lags[ok][0] and ac[half] > 0.80*ac[best]: best = half
+    # 4:3 alias guard, the mirror of the octave guard above: if 4/3 of the winning lag (the true,
+    # SLOWER grid under a dotted-eighth reading) is comparably supported, prefer it.
+    four3 = int(round(best*4/3))
+    if four3 < len(ac) and ac[four3] > 0.80*ac[best]: best = four3
     if 0 < best < len(ac)-1:
         y0,y1,y2 = ac[best-1],ac[best],ac[best+1]
         d = y0-2*y1+y2
@@ -174,6 +188,32 @@ def selftest():
         got = tempo(x, SR).get("bpm",0)
         good = abs(got-bpm) < 1.0; ok &= good
         print(f"   {bpm:6.1f} -> {got:7.2f}  {'ok' if good else 'FAIL'}")
+    print("\nTEMPO — 100 BPM kicks under dotted-eighth hats (the 4:3 alias that read 133)")
+    x = np.zeros(int(SR*20))
+    for k in range(int(20/0.6)):
+        p_ = int(k*0.6*SR)
+        if p_+300 < len(x):
+            t_ = np.arange(300)/SR
+            x[p_:p_+300] += np.sin(2*np.pi*55*t_)*np.hanning(300)          # 55 Hz kick
+    for k in range(int(20/0.45)):
+        p_ = int(k*0.45*SR)
+        if p_+120 < len(x):
+            x[p_:p_+120] += np.random.default_rng(k).normal(0,0.25,120)*np.hanning(120)  # hat
+    got = tempo(x, SR).get("bpm",0)
+    good = abs(got-100.0) < 2.0; ok &= good
+    print(f"   kick+hats -> {got:7.2f} (want ~100, alias reads 133)  {'ok' if good else 'FAIL'}")
+
+    print("\nCLIPPING — a rail-pinned s16 file must COUNT (the old threshold could never fire)")
+    with tempfile.TemporaryDirectory() as td:
+        p_ = Path(td)/"c.wav"
+        xc = np.zeros((SR,2)); xc[1000:1300] = 1.0                          # 300 pinned samples
+        with wave.open(str(p_),"wb") as w:
+            w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR)
+            w.writeframes((np.clip(xc,-1,1)*32767).astype("<i2").tobytes())
+        L = loudness(p_)
+        good = L["clipped"] >= 300; ok &= good
+        print(f"   pinned 600 ch-samples -> counted {L['clipped']}  {'ok' if good else 'FAIL'}")
+
     print("\nLOUDNESS — a -1 dBFS sine must read -1, and clipping must be counted")
     with tempfile.TemporaryDirectory() as td:
         p = Path(td)/"s.wav"
