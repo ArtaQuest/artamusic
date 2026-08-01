@@ -19,6 +19,12 @@ one public Kaggle notebook whose run produces the exact files that get published
 | `validation/craft_targets.json` | lyric craft targets, measured with the same instrument that scores |
 | `song/lyrics_unbroken.txt` | the lyric as sung |
 
+**The 4-line outro is the lyric's ending, not a truncation** — it is the final station of the
+forge spine (heat → hammer → quench → edge): verse 1, verse 2, bridge and outro each close on
+their "call it …" line, in that order, and every chorus is word-identical. Both are locked
+invariants: `lyric_profile.py` fails loudly if any edit breaks the spine order or the chorus
+identity, so the gate trips automatically instead of relying on a note being read.
+
 The craft reference is Glum Aleks' *Typical Story*. Its text is **not** included here (it is not
 ours to redistribute); `craft_targets.json` carries the measured profile, and the profiler
 recomputes targets from any local copy so instrument and target can never drift apart.

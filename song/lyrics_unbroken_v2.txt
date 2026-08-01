@@ -1,0 +1,86 @@
+v2 (2026-08-01) — the triple-check revision, applied by the review's own lyric surgeon.
+Changes from v1 (as sung by takes t1-t4):
+  - HOOK: "Unbroken, hold the line" -> "Never broken, hold the line" at all 8 occurrences.
+    Rationale (confirmed by an adversarial verifier): an unstressed "un-" pickup is the same
+    error class that re-voted "I got able" into "I got eight"; a stressed line-initial "NEV-er"
+    cannot be swallowed without deleting a stressed syllable. The TITLE stays "Unbroken".
+    DECISION GATE: this change is provisional until the next run's takes are machine-transcribed
+    and the hook survives — the same evidence bar every other singability rule met.
+  - VERSE 2 rebuilt into four true couplets: away/hate, bill/will, jaw/saw, ladder/hammer
+    (keys -> ladder, letter -> notice). "call it hammer" stays section-final; spine untouched.
+
+[verse]
+Cold house, thin coat, cracked door
+Wind came through and took the floor
+Take the blanket, take the bread
+Take the roof above my head
+Drag me out into the dirt
+Cold got in and did its work
+Winter put me on the street
+Take the winter, call it heat
+
+[pre-chorus]
+Put me in the coals and wait
+Hold me down and shut the gate
+Water hits me, steam goes white
+Pull me out, I keep my shape
+
+[chorus]
+Bring the heat, I take the flame
+Swing the hammer, call my name
+Every blow they meant to kill
+Beat the iron into steel
+Strike me hard and hear it ring
+Never broken, hold the line
+Swing again and hear it ring
+Never broken, hold the line
+
+[verse]
+Man I trusted walked away
+They were forging what they hate
+Send the notice, send the bill
+Send the men to break my will
+Every fist that found my jaw
+Made the edge they never saw
+Take the table, take the ladder
+Take the beating, call it hammer
+
+[pre-chorus]
+Put me in the coals and wait
+Hold me down and shut the gate
+Water hits me, steam goes white
+Pull me out, I keep my shape
+
+[chorus]
+Bring the heat, I take the flame
+Swing the hammer, call my name
+Every blow they meant to kill
+Beat the iron into steel
+Strike me hard and hear it ring
+Never broken, hold the line
+Swing again and hear it ring
+Never broken, hold the line
+
+[bridge]
+Some nights I sat down and cried
+Some nights I bent in the dark
+Hands were shaking, head hung low
+Kitchen light, the water cold
+Hold my face under the tap
+Come up harder, call it quench
+
+[chorus]
+Bring the heat, I take the flame
+Swing the hammer, call my name
+Every blow they meant to kill
+Beat the iron into steel
+Strike me hard and hear it ring
+Never broken, hold the line
+Swing again and hear it ring
+Never broken, hold the line
+
+[outro]
+Bring it all now, call it edge
+Never broken, hold the line
+Bring it all now, call it edge
+Never broken, hold the line

@@ -35,6 +35,11 @@ strike beat hit pour hand
 TARGET = {"syllables": 7.1, "tight_pct": 87.0, "mono_pct": 71.0,
           "imper_pct": 35.0, "word_len": 4.13}
 
+# UNBROKEN's locked forge spine: verse 1, verse 2, bridge and outro each close on their
+# "call it …" station, in exactly this order. The 4-line outro is that spine's final
+# station, not a truncation — see README. Enforced below, not documented and forgotten.
+SPINE = ["call it heat", "call it hammer", "call it quench", "call it edge"]
+
 
 def syllables(line):
     n = 0
@@ -70,6 +75,40 @@ def measure(text):
             "short_lines": [(l, s) for l, s in zip(lines, syl) if s < 6]}
 
 
+def check_invariants(text, name=""):
+    """Structural invariants any lyric edit must not break. Returns a list of violations.
+
+    1. Every [chorus] block is word-identical (a singability rule: the machine-transcription
+       failures all came from near-identical variants re-voted into something else).
+    2. For the UNBROKEN lyric (detected by its spine): the last "call it …" line of each
+       verse/bridge/outro section walks SPINE in order — heat, hammer, quench, edge.
+    """
+    secs, cur = [], None
+    for raw in text.splitlines():
+        s = raw.strip()
+        if not s or s.startswith("("):
+            continue
+        if s.startswith("["):
+            cur = (s.strip("[]").strip().lower(), [])
+            secs.append(cur)
+        elif cur is not None:
+            cur[1].append(" ".join(re.findall(r"[a-z']+", s.lower())))
+    problems = []
+    choruses = ["\n".join(lines) for tag, lines in secs if tag == "chorus"]
+    if len(choruses) > 1 and len(set(choruses)) != 1:
+        problems.append(f"chorus blocks are NOT word-identical ({len(choruses)} blocks)")
+    if SPINE[0] in text.lower() or "unbroken" in name.lower():
+        stations = []
+        for tag, lines in secs:
+            if tag in ("verse", "bridge", "outro"):
+                hits = [m for line in lines for m in re.findall(r"call it [a-z']+", line)]
+                if hits:
+                    stations.append(hits[-1])
+        if stations != SPINE:
+            problems.append(f"forge spine broken: {stations} != {SPINE}")
+    return problems
+
+
 def report(name, m):
     def gap(key, tol):
         d = m[key] - TARGET[key]
@@ -86,9 +125,17 @@ def report(name, m):
         print(f"    short ({s}): {l}")
 
 
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit(__doc__)
+    bad = False
     for p in sys.argv[1:]:
-        m = measure(Path(p).read_text())
+        text = Path(p).read_text()
+        m = measure(text)
         report(Path(p).name, m) if m else print(f"{p}: no lyric lines")
+        for problem in check_invariants(text, Path(p).name):
+            print(f"  INVARIANT BROKEN: {problem}")
+            bad = True
+    if bad:
+        sys.exit(1)
