@@ -29,7 +29,13 @@ TMP = Path("/tmp/aq"); TMP.mkdir(parents=True, exist_ok=True)
 REPO = TMP / "ACE-Step-1.5"; CKPT = TMP / "checkpoints"
 OUT = Path("/kaggle/working/out"); OUT.mkdir(parents=True, exist_ok=True)
 os.environ.update(HF_HOME=str(TMP / "hf"), HF_HUB_ENABLE_HF_TRANSFER="1",
-                  ACESTEP_CHECKPOINTS_DIR=str(CKPT), ACESTEP_PROJECT_ROOT=str(REPO))
+                  ACESTEP_CHECKPOINTS_DIR=str(CKPT), ACESTEP_PROJECT_ROOT=str(REPO),
+                  # ACE-Step kills generation at 600 s by default. The 4.6B model LOADS
+                  # fine here (12.12 GB peak, 3.7 GB spare) but cannot finish 180 s of
+                  # audio inside that window on a P100: the 1.1B takes ~250 s, and 4.2x
+                  # the parameters means ~1000 s. All six takes died at exactly 600 s.
+                  # The constraint is THROUGHPUT, not memory, and this is the knob for it.
+                  ACESTEP_GENERATION_TIMEOUT="2400")
 
 def sh(c, quiet=False):
     if not quiet: print(f"$ {c}", flush=True)
@@ -199,16 +205,18 @@ Unbroken, hold the line"""
 # came back female from male-explicit captions — which is why the register is MEASURED below and
 # a female take is discarded rather than shipped.
 TAKES = [
-    ("t1", "trap, epic, male choir, baritone",     80, 7.5, 6103),
-    ("t2", "trap, cinematic, male rap",            80, 7.5, 7211),
-    ("t3", "cinematic, orchestral, baritone",      80, 7.5, 7322),
-    ("t4", "epic orchestral trap, male vocals",    80, 7.0, 7433),
-    ("t5", "trap, epic, choir, baritone",          80, 8.0, 7544),
-    ("t6", "trap, epic, male choir, baritone",     80, 7.5, 7655),
+    ("t1", "trap, epic, male choir, baritone",     60, 7.5, 6103),
+    ("t2", "trap, cinematic, male rap",            60, 7.5, 7211),
+    ("t3", "cinematic, orchestral, baritone",      60, 7.5, 7322),
+    ("t4", "epic orchestral trap, male vocals",    60, 7.0, 7433),
 ]
 DURATION = 180.0
 
 import toml
+# The repo is cloned into /tmp, not installed — without this the import fails 178 s in,
+# after the environment is built but before any GPU work. The probe had this line; this
+# script did not, which is what lifting code between files costs when the imports differ.
+sys.path.insert(0, str(REPO))
 from acestep.handler import AceStepHandler
 
 # ── walk the ladder ONCE, then keep the rung that held ───────────────────────────────────
@@ -255,6 +263,7 @@ for name, caption, steps, cfg, seed in TAKES:
     conf.write_text(toml.dumps(config_for(name, caption, steps, cfg, seed)))
     t0 = time.time()
     rc = sh(f"cd {REPO} && AQ_FORCE_DTYPE={chosen['dtype']} PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True "
+            f"ACESTEP_GENERATION_TIMEOUT=2400 "
             f"python cli.py -c {conf} --backend pt --log-level INFO")
     took = round(time.time() - t0, 1)
     found = sorted(Path(TMP / f"out_{name}").rglob("*.flac")) + \
