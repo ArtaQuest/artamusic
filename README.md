@@ -2,8 +2,15 @@
 
 Generating a finished record — song, master, cover — on **free hardware**, with every claim
 measured rather than asserted. This is the production pipeline behind **UNBROKEN**, an epic
-hybrid-trap anthem published through [ArtaQuest](https://artaquest.com)'s reproducibility gate:
-one public Kaggle notebook whose run produces the exact files that get published.
+hybrid-trap anthem submitted through [ArtaQuest](https://artaquest.com)'s reproducibility gate
+(work 9320). The publication run is [`arash0ash/unbroken-final`](https://www.kaggle.com/code/arash0ash/unbroken-final):
+one public notebook that generates the song by cover-conditioning on the previously published male
+take, GATES each candidate in-run (register on a demucs-isolated stem + Whisper word accuracy,
+with the measuring code fetched from this repo pinned by commit), masters with a static gain and
+4x-oversampled true-peak limiter, and renders the cover — so the published files are provably the
+run's own outputs, and the claims are checked in the run that made them. Gate verdict of record:
+seed 4242 ACCEPTED, 138.2 Hz male, 87.3% word accuracy; master -10.2 LUFS, LRA 5.6 LU against the
+reference record's 5.4.
 
 ## Layout
 
