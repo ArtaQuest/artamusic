@@ -30,6 +30,7 @@ pick put give bring draw make kick sell cue raise break let go count hold ask sa
 take name call keep watch run stand walk lift carry burn cut close open leave stay come
 show tell send pull push drop find start begin turn set write read pay bury dig swing drag throw
 strike beat hit pour hand
+roll wrap shut sweep back stack tape fold bag lock load haul lay place mark seal clear
 """.split())
 
 TARGET = {"syllables": 7.1, "tight_pct": 87.0, "mono_pct": 71.0,
@@ -41,14 +42,57 @@ TARGET = {"syllables": 7.1, "tight_pct": 87.0, "mono_pct": 71.0,
 SPINE = ["call it heat", "call it hammer", "call it quench", "call it edge"]
 
 
+# Words whose spelling defeats every rule below. Kept tiny and explicit — a lookup table that
+# grows without bound is a sign the rules are wrong, not a fix.
+_EXCEPT = {"every": 2, "everything": 3, "evening": 2, "different": 3, "business": 2,
+           "family": 3, "people": 2, "quiet": 2, "being": 2, "doing": 2, "going": 2}
+
+
 def syllables(line):
+    """Count sung syllables. Validated against known-truth words in selftest().
+
+    The naive vowel-group count is wrong in three ways that matter for a lyric of household
+    nouns, and all three were found by measuring words whose answer is known:
+      driveway -> 3   (an internal silent 'e' is a vowel group but not a syllable)
+      polished -> 3   ('-ed' after most consonants is silent: pol-ished, not pol-ish-ed)
+      table    -> 1   (a final consonant + 'le' IS a syllable, the old silent-e rule ate it)
+    An over-count inflates the mean and pushes lines out of the 6-8 band that never left it,
+    so this is not cosmetic: it decides which lines a craft check flags.
+    """
     n = 0
     for w in re.findall(r"[a-z']+", line.lower()):
+        if w in _EXCEPT:
+            n += _EXCEPT[w]
+            continue
         c = len(VOWELS.findall(w))
-        if w.endswith("e") and c > 1:
+        # final consonant + "le" is its own syllable (ta-ble, cou-ple, lit-tle) — count it back
+        if len(w) > 2 and w.endswith("le") and w[-3] not in "aeiouy":
+            pass
+        elif w.endswith("e"):
+            c -= 1                                   # silent final e
+        # silent "-ed": voiced only after t or d (want-ed, need-ed)
+        if w.endswith("ed") and len(w) > 3 and w[-3] not in "td" and w[-3] not in "aeiouy":
+            c -= 1
+        # internal silent e in compounds: drive+way, home+work, side+walk
+        for a, b in (("ew", 2), ("es", 2)):
+            pass
+        if re.search(r"[^aeiouy]e[wy]", w):           # drive-way, home-ward style joins
             c -= 1
         n += max(1, c)
     return n
+
+
+def selftest():
+    """Validate the counter against words whose syllable count is not in dispute."""
+    TRUTH = {"driveway": 2, "polished": 2, "stacked": 1, "table": 2, "hallway": 2, "corner": 2,
+             "glasses": 2, "wallpaper": 3, "overcoat": 3, "boxes": 2, "waiting": 2, "carpet": 2,
+             "property": 3, "doorway": 2, "hammer": 2, "unbroken": 3, "winter": 2, "blanket": 2,
+             "every": 2, "everything": 3, "creaking": 2, "furniture": 3}
+    bad = [(w, t, syllables(w)) for w, t in TRUTH.items() if syllables(w) != t]
+    for w, t, g in bad:
+        print(f"   {w:12s} truth {t}  got {g}  WRONG")
+    print("syllable counter:", "ALL PASSED" if not bad else f"{len(bad)} FAILURES")
+    return not bad
 
 
 def measure(text):
