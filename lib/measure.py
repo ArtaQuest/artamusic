@@ -23,9 +23,10 @@ SR, EPS = 44100, 1e-12
 BANDS = [(20,60),(60,120),(120,250),(250,500),(500,1000),
          (1000,2000),(2000,4000),(4000,8000),(8000,16000)]
 # Adult ranges overlap between 165 and 195 Hz; a reading there names nothing, so it is reported as
-# ambiguous rather than forced into a class.
-MALE_MAX, FEMALE_MIN = 165.0, 195.0
-
+# ambiguous rather than forced into a class. MALE_MIN exists because a stem that leaks 808 has no
+# voice in it at all: without a lower bound, bass bleed classifies as a confident male vocal —
+# the exact artefact this function was written to prevent.
+MALE_MIN, MALE_MAX, FEMALE_MIN = 85.0, 165.0, 195.0
 
 def load(path, sr=SR, mono=False):
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as t: tmp = t.name
@@ -63,30 +64,92 @@ def f0_yin(x, sr, lo=70.0, hi=500.0, frame=2048, hop=512, thresh=0.15):
     return np.array(out)
 
 
-def register(path):
-    """Vocal register from a demucs-ISOLATED stem. Never from the mix.
+def _row(**kw):
+    """One key set for every exit path. A caller reading reg["lead_hz"] must never KeyError
+    because the stem was missing — a downstream crash on the failure path is how a gate stops
+    gating."""
+    r = {"register": "unknown", "f0_hz": None, "q1_hz": None, "q3_hz": None, "spread_st": None,
+         "lead_hz": None, "lead_frac": None, "oct_up_frac": None, "voiced_s": 0.0,
+         "frames": 0, "bands": {}}
+    r.update(kw)
+    return r
 
-    A mix-based estimator locks onto the 808: its harmonics at 80/160/240 Hz sit directly over the
-    male vocal range. The previous one returned only exact FFT-bin multiples (10.7666 Hz/bin at
-    n_fft=2048, sr=22050 — 129.20, 139.97, 161.50, 172.27), was wrong on 8 of 8 takes, and never
-    once fired the female gate it existed to enforce.
+
+def register(path, hop_div=2):
+    """Describe the singing voice as a DISTRIBUTION, not a verdict.
+
+    Why this is not a boolean any more. YIN is monophonic by construction: it estimates ONE pitch
+    per frame. On a stem containing a male lead and a choir an octave above, the median simply
+    reports the louder one — adding a second voice does not move it. So this function can support
+    "the lead measures male"; it can NEVER support "no other voice is present", and the earlier
+    version's confident single number invited exactly that overclaim.
+
+    It also replaces a linear IQR threshold with a SEMITONE spread. Pitch is logarithmic: 60 Hz of
+    spread means something entirely different at 130 Hz than at 230 Hz, so the old rule was
+    stricter on low voices than high ones — backwards, for a gate whose job is finding low voices.
+
+    Measured on this corpus: covers 7.03-7.08 st, the reference take 7.15, the shipped master
+    10.09, a deliberate choir take 16.77.
     """
     import demucs.separate
     with tempfile.TemporaryDirectory() as td:
         demucs.separate.main(shlex.split(
             f'--two-stems vocals -n htdemucs --device cpu -o "{td}" "{path}"'))
         voc = next(Path(td).rglob("vocals.wav"), None)
-        if voc is None: return {"register":"no-vocal-stem"}
+        if voc is None:
+            return _row(register="no-vocal-stem")
         x, sr = load(voc, mono=True)
-        f0 = f0_yin(x[::2], sr//2)
-    if len(f0) < 40: return {"register":"unknown","frames":int(len(f0))}
-    med = float(np.median(f0)); q1,q3 = np.percentile(f0,[25,75])
-    reg = "male" if med < MALE_MAX else ("female" if med > FEMALE_MIN else "ambiguous")
-    # A wide spread means the estimate is untrustworthy, not that the register is known. The
-    # genuine male take measured an IQR of 19.8 Hz; the two females, 54.1 and 69.9.
-    return {"f0_hz":round(med,1), "iqr_hz":round(float(q3-q1),1),
-            "frames":int(len(f0)), "register":reg,
-            "trusted": bool((q3-q1) < 60)}
+        f0 = f0_yin(x[::hop_div], sr // hop_div)
+    if len(f0) < 40:
+        return _row(register="unknown", frames=int(len(f0)))
+
+    f0 = np.asarray(f0, dtype=float)
+    med = float(np.median(f0))
+    q1, q3 = (float(v) for v in np.percentile(f0, [25, 75]))
+    spread_st = float(12 * np.log2(q3 / max(q1, 1e-9)))
+
+    # Mode structure, reported as DISCLOSURE — how many voices, and where. Never the verdict:
+    # the lowest mode is usually the bass, not the lead (that mistake cost a false positive).
+    lg = np.log2(f0)
+    hist, edges = np.histogram(lg, bins=48)
+    peaks = [i for i in range(1, len(hist) - 1)
+             if hist[i] >= hist[i-1] and hist[i] >= hist[i+1] and hist[i] > 0.10 * hist.max()]
+    lead_hz = float(2 ** ((edges[peaks[0]] + edges[peaks[0]+1]) / 2)) if peaks else med
+    within = np.abs(12 * np.log2(f0 / lead_hz))
+    lead_frac = float((within <= 3.0).mean())          # frames belonging to the lead
+    oct_up = 12 * np.log2(f0 / lead_hz)
+    oct_up_frac = float((np.abs(oct_up - 12.0) <= 0.5).mean())   # a second voice an octave above
+
+    bands = {"sub_85": float((f0 < MALE_MIN).mean()),
+             "male": float(((f0 >= MALE_MIN) & (f0 < MALE_MAX)).mean()),
+             "overlap": float(((f0 >= MALE_MAX) & (f0 <= FEMALE_MIN)).mean()),
+             "female": float((f0 > FEMALE_MIN).mean())}
+
+    # CLASSIFY FROM THE MEDIAN, DISCLOSE FROM THE MODES.
+    #
+    # An earlier version of this classified from "the lowest well-populated mode", reasoning that
+    # a male lead under a female choir would be the lower one. Measured on the corpus, that logic
+    # labelled a KNOWN FEMALE take (median 197.4 Hz) as "male-lead" because it latched onto 88.9 Hz
+    # of low-frequency bleed carrying just 9.1% of frames — a false positive on precisely the axis
+    # this gate exists to guard. The lowest mode is not the lead; it is usually the bass.
+    #
+    # So the median does the classifying (it is robust, and it is what the corpus separates on),
+    # and the mode structure is reported as DISCLOSURE — never as the verdict. A class must also
+    # be SUPPORTED: if more voiced frames sit in the opposite band than in the claimed one, the
+    # honest answer is "mixed", not a confident label.
+    if med < MALE_MIN:
+        reg = "sub-range"                 # no voice at all — 808 bleed, never "male"
+    elif med < MALE_MAX:
+        reg = "male" if bands["male"] >= bands["female"] else "mixed"
+    elif med <= FEMALE_MIN:
+        reg = "ambiguous"
+    else:
+        reg = "female" if bands["female"] >= bands["male"] else "mixed"
+    return _row(register=reg, f0_hz=round(med, 1), q1_hz=round(q1, 1), q3_hz=round(q3, 1),
+                spread_st=round(spread_st, 2), lead_hz=round(lead_hz, 1),
+                lead_frac=round(lead_frac, 3), oct_up_frac=round(oct_up_frac, 3),
+                voiced_s=round(len(f0) * 512 * hop_div / 44100, 1), frames=int(len(f0)),
+                bands={k: round(v, 3) for k, v in bands.items()})
 
 
 def loudness(path):

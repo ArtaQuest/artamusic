@@ -11,3 +11,9 @@ recovered/
 .push-*/
 __pycache__/
 venv/
+
+# Credentials never belong in a public repo — kpush.py reads ~/.kaggle/kaggle.json
+kaggle.json
+.kaggle/
+*.pem
+*token*
