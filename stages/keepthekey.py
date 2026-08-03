@@ -149,9 +149,83 @@ MALE_REF = _ref[0] if _ref else None
 assert MALE_REF, "male reference not mounted — fail at second five, not minute forty"
 print("male reference:", MALE_REF, flush=True)
 
-LYRICS = """__LYRICS_GO_HERE__"""
+LYRICS = """[verse]
+Back the truck up on the drive
+Gate down under a grey sky
+Take the cups down off the shelf
+Cups he shined and stacked himself
+Glasses wrapped and taped up tight
+Boxes marked and stacked just right
+Kitchen's boxed and in the hall
+Man held on to it, that's all
 
-CAPTION = "__CAPTION_GOES_HERE__"
+[pre-chorus]
+Table tips and corners scrape
+Door too tight, the paint gives way
+Take the weight, keep it moving
+All of it comes out this house
+
+[chorus]
+Take the table out the door
+Roll the rug up off the floor
+Wrap the glass and sweep the corner
+Truck out front, sitting lower
+Rooms get bigger when they're bare
+Dad's coat hangs there on the stair
+Coat rides up front with me
+Shut the door, keep the key
+
+[verse]
+Frames come down off every wall
+Pale squares up and down the hall
+Sweep the boards and bag the grit
+Haul the boxes, get on with it
+Coats and boots and empty hooks
+His grey coat stays on its hook
+Rest of it goes on the truck
+Room I slept in, swept and shut
+
+[pre-chorus]
+Fold the bed up, lean the frame
+Bare top floor still creaks the same
+Take the weight, keep it moving
+All of it comes out this house
+
+[chorus]
+Take the table out the door
+Roll the rug up off the floor
+Wrap the glass and sweep the corner
+Truck out front, sitting lower
+Rooms get bigger when they're bare
+Dad's coat hangs there on the stair
+Coat rides up front with me
+Shut the door, keep the key
+
+[bridge]
+Stand there in the room and wait
+Boots and chairs go by, it's late
+Head goes back, the paint's gone yellow
+Pale square, nail hole, dust below
+Someone asks me if I'm good
+I say yeah. I lift the wood
+
+[chorus]
+Take the table out the door
+Roll the rug up off the floor
+Wrap the glass and sweep the corner
+Truck out front, sitting lower
+Rooms get bigger when they're bare
+Dad's coat hangs there on the stair
+Coat rides up front with me
+Shut the door, keep the key
+
+[outro]
+Truck pulls out and down the drive
+Coat up front, same as always
+New name where his used to be
+Shut the door, keep the key"""
+
+CAPTION = "epic hybrid trap, cinematic, war drums, deep male choir chants, distorted 808 sub bass, dark orchestral strings, low gravelled male lead vocal, minor key, slow heavy groove, brooding"
 DURATION = 180.0
 BPM, KEYSCALE = 100, "F minor"   # match the conditioning source; a key fight with src_audio is
                                  # an experiment, and a publication run is not where you run it
