@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """Push/poll a Kaggle kernel. Rebuilt after the scratchpad was lost.
 
@@ -78,6 +79,37 @@ def call(fn, *a, **kw):
             _time.sleep(sleep_s)
             delay = min(delay * 2, 300.0)
     raise RuntimeError("unreachable")
+
+
+# ── identity guard ───────────────────────────────────────────────────────────────────────
+# The kaggle package authenticates AT IMPORT TIME from whatever credential is visible then.
+# Swapping ~/.kaggle/kaggle.json or setting KAGGLE_CONFIG_DIR after the import does NOTHING —
+# a lesson that has now cost three misfires, the last one deleting a RUNNING kernel that
+# belonged to another project (artafather/artamic-pretrain, 2026-08-04). To act as a different
+# account, launch a FRESH python process with KAGGLE_CONFIG_DIR set in its environment.
+#
+# delete() below is the only sanctioned way to delete a kernel from this module: it re-reads
+# the credential file at call time and refuses when the ref's owner does not match, so a stale
+# in-process identity can never destroy another account's work again.
+
+def whoami_file():
+    """The username in the credential FILE right now — not the (possibly stale) session."""
+    import json as _j
+    cfg = Path(os.environ.get("KAGGLE_CONFIG_DIR", str(Path.home() / ".kaggle")))
+    return _j.loads((cfg / "kaggle.json").read_text())["username"]
+
+
+def delete(api_obj, ref, expected_owner=None):
+    ref_owner = ref.split("/", 1)[0]
+    file_owner = whoami_file()
+    sess_owner = api_obj.config_values.get("username")
+    want = expected_owner or ref_owner
+    if not (ref_owner == file_owner == sess_owner == want):
+        raise RuntimeError(
+            f"identity mismatch — REFUSING delete of {ref}: ref-owner={ref_owner}, "
+            f"credential-file={file_owner}, session={sess_owner}, expected={want}. "
+            f"The kaggle package authenticates at import; restart the process to switch account.")
+    return call(api_obj.kernels_delete, ref, no_confirm=True)
 
 
 def api():
