@@ -51,10 +51,21 @@ recomputes targets from any local copy so instrument and target can never drift 
 - **float16 overflows to NaN in the 4.6B DiT on sm_60** (`nan=280000`, four seeds). bfloat16 has
   float32's exponent range and runs at 0.81x float32 speed on this card — hardware, not emulation.
   `bitsandbytes` needs sm_75 and is unavailable.
-- **Vocal register is a lottery no caption controls.** Across 12 takes with male-explicit captions
-  (both model sizes), one came back male. Register must be measured on a **demucs-isolated stem**
-  with YIN — mix-based estimators lock onto the 808's harmonics and returned exact FFT-bin
-  multiples, wrong on 8 of 8 takes.
+- **Vocal register is a lottery no caption controls.** Across 15 caption-conditioned takes (both
+  model sizes), one came back male. Register must be measured on a **demucs-isolated stem** with
+  YIN — mix-based estimators lock onto the 808's harmonics and returned exact FFT-bin multiples,
+  wrong on 8 of 8 takes. The instrument reports a DISTRIBUTION (median, quartiles, semitone
+  spread, lead mode, band occupancy), never a bare verdict: YIN is monophonic, so it can support
+  "the lead measures male" and can never support "no other voice is present".
+- **The conditioning reference is male-lead, not "verified male".** Re-measured under the pinned
+  instrument, the reference take reads median 165.9 Hz — on the male/ambiguous boundary — with a
+  lead mode at 116.8 Hz carrying 40% of voiced frames. Claims conditioned on it inherit exactly
+  that, no more.
+- **Conditioning modes, measured.** Cover (src_audio) transfers the voice but drags the source's
+  WORDS: with a different lyric, intelligibility fell 71→70→63% as strength rose 0.6→0.8→0.9 — a
+  two-knob trap with no winning setting. STYLE TRANSFER (text2music + reference_audio) breaks it:
+  words stay text-driven (89% at strength 0.2) while the reference biases timbre (male 145.9 Hz
+  at 0.35). Same-lyric covers remain the strongest voice hold (3/3 male at every strength tried).
 - **ffmpeg `loudnorm` silently discards `linear=true`** when the target is unreachable and runs a
   gain rider instead — it collapsed loudness range 7.1 → 3.0 LU against a 5.4 LU reference. Use a
   static gain plus a 4x-oversampled limiter (`alimiter` at base rate is sample-peak, not true-peak).
