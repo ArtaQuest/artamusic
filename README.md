@@ -1,5 +1,13 @@
 # ArtaMusic
 
+**Records of record:** [`KEEP THE KEY`](https://www.kaggle.com/code/artafather/keep-the-key) —
+ArtaQuest work 9321, style-transfer conditioning, verified on the delivered bytes: male lead
+156.3 Hz (independent re-measure 156.7 — two machines, one pinned instrument, 0.4 Hz apart),
+90.9% word accuracy under whisper large-v3, LRA 6.8 LU, true peak −1.1 dBTP on target, zero
+clipped samples, checklist zero-blocking. And [`UNBROKEN`](https://www.kaggle.com/code/arash0ash/unbroken-final)
+— work 9320, the record whose adversarial post-mortem built every gate the successor passed.
+
+
 Generating a finished record — song, master, cover — on **free hardware**, with every claim
 measured rather than asserted. This is the production pipeline behind **UNBROKEN**, an epic
 hybrid-trap anthem submitted through [ArtaQuest](https://artaquest.com)'s reproducibility gate
