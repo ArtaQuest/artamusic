@@ -108,7 +108,9 @@ import measure as M
 # was not validated against known-truth signals turned out to be wrong. 3 seconds, or no run.
 assert M.selftest(), "measurement selftest FAILED — no number from this build can be trusted"
 
-_WH = [None, None]   # model, judged_by
+_WH = [None, None]   # model, judged_by — loaded PER CALL and unloaded after, never resident:
+# a 6 GB float32 large-v3 parked on the GPU starved the next candidate's 12.2 GB render into
+# silent garbage (rc 0, no file — ACE-Step's #924 guard suppresses rather than crashes).
 def asr():
     from faster_whisper import WhisperModel
     if _WH[0] is None:
@@ -122,11 +124,18 @@ def asr():
         print("ASR judge:", _WH[1], flush=True)
     return _WH[0]
 
+def asr_release():
+    import gc
+    _WH[0] = None
+    gc.collect()
+    torch.cuda.empty_cache()
+
 def word_accuracy(mp3, lyric_text):
     import re as _re
     segs, _ = asr().transcribe(str(mp3), beam_size=5, vad_filter=False,
                                condition_on_previous_text=False)
     hyp = _re.findall(r"[a-z']+", " ".join(s.text for s in segs).lower())
+    asr_release()   # never leave 6 GB parked in front of the next render
     ref = _re.findall(r"[a-z']+", _re.sub(r"\[[^\]]*\]", " ", lyric_text.lower()))
     d = np.zeros((len(ref)+1, len(hyp)+1), dtype=np.int32)
     d[:,0] = np.arange(len(ref)+1); d[0,:] = np.arange(len(hyp)+1)
@@ -281,9 +290,9 @@ assert chosen, "no rung held"
 (WORK / "rung.json").write_text(json.dumps({**chosen, "pins": PINS, "seed": SEED}, indent=2))
 
 # ── candidates: render, gate, keep the first that passes ────────────────────────────────
-CANDIDATES = [SEED, 4343, 4444]
+CANDIDATES = [(SEED, 0.6), (4343, 0.8), (4444, 0.9)]   # (seed, cover_strength) — escalate toward the voice if the lyric pulls register off
 WINNER, WINNER_ACC, gate_log = None, None, []
-for seed in CANDIDATES:
+for seed, strength in CANDIDATES:
     name = f"cand{seed}"
     conf = TMP / f"{name}.toml"
     conf.write_text(toml.dumps({
@@ -291,7 +300,7 @@ for seed in CANDIDATES:
         "save_dir": str(TMP / f"out_{name}"), "audio_format": "flac", "device": "cuda",
         "offload_to_cpu": chosen["offload_to_cpu"],
         "offload_dit_to_cpu": chosen["offload_dit_to_cpu"],
-        "task_type": "cover", "src_audio": MALE_REF, "audio_cover_strength": 0.6,
+        "task_type": "cover", "src_audio": MALE_REF, "audio_cover_strength": strength,
         "caption": CAPTION, "lyrics": LYRICS, "instrumental": False,
         "bpm": BPM, "keyscale": KEYSCALE, "timesignature": "4/4", "vocal_language": "en",
         "duration": DURATION, "inference_steps": 80, "guidance_scale": 7.5,
@@ -300,16 +309,22 @@ for seed in CANDIDATES:
         "use_cot_lyrics": False, "use_cot_language": False,
         "batch_size": 1, "use_random_seed": False, "seeds": [seed]}))
     t0 = time.time()
-    sh(f"cd {REPO} && AQ_FORCE_DTYPE={chosen['dtype']} "
+    # No pipes here: PIPESTATUS is bash-only and shell=True is dash on this image — a pipe
+    # would silently report tail's exit code as the render's. Redirect whole-output to a file;
+    # the line's rc is then genuinely the CLI's.
+    rc = sh(f"cd {REPO} && AQ_FORCE_DTYPE={chosen['dtype']} "
        f"PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True ACESTEP_GENERATION_TIMEOUT=2400 "
-       f"python cli.py -c {conf} --backend pt --log-level INFO", quiet=True)
+       f"python cli.py -c {conf} --backend pt --log-level INFO > /tmp/cli_{name}.txt 2>&1", quiet=True)
     found = sorted(Path(TMP / f"out_{name}").rglob("*.flac")) + \
             sorted(Path(TMP / f"out_{name}").rglob("*.wav"))
     row = {"seed": seed, "seconds": round(time.time()-t0, 1), "steps": 80,
-           "cover_strength": 0.6, "model": chosen["model"], "dtype": chosen["dtype"]}
+           "cover_strength": strength, "model": chosen["model"], "dtype": chosen["dtype"]}
     if not found:
-        row["verdict"] = "no audio"; gate_log.append(row)
-        print(f"{name}: no audio", flush=True); continue
+        tail = Path(f"/tmp/cli_{name}.txt").read_text()[-800:] if Path(f"/tmp/cli_{name}.txt").exists() else ""
+        row["verdict"] = f"no audio (rc={rc})"; row["cli_tail"] = tail
+        gate_log.append(row)
+        (WORK / "gate.json").write_text(json.dumps(gate_log, indent=2))
+        print(f"{name}: no audio rc={rc}\n{tail[-400:]}", flush=True); continue
     mp3 = OUT / f"{name}.mp3"
     sh(f"ffmpeg -v error -i '{max(found, key=lambda p: p.stat().st_size)}' "
        f"-codec:a libmp3lame -b:a 320k '{mp3}' -y", quiet=True)
@@ -394,7 +409,7 @@ sh(f"ffmpeg -v error -loop 1 -i '{art}' -i '{wav}' "
    f"-shortest '{mp4}' -y")
 
 # ── VERIFY: the last word, on the exact bytes that ship ─────────────────────────────────
-verify = {"pins": PINS, "seed_policy": f"first passing candidate of {CANDIDATES}"}
+verify = {"pins": PINS, "seed_policy": f"first passing (seed,strength) of {CANDIDATES}"}
 ok_reg, reg = register_gate(mp3)
 acc = word_accuracy(mp3, LYRICS)
 Lw, Lm = M.loudness(wav), M.loudness(mp3)
