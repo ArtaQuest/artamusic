@@ -290,7 +290,12 @@ assert chosen, "no rung held"
 (WORK / "rung.json").write_text(json.dumps({**chosen, "pins": PINS, "seed": SEED}, indent=2))
 
 # ── candidates: render, gate, keep the first that passes ────────────────────────────────
-CANDIDATES = [(SEED, 0.6), (4343, 0.8), (4444, 0.9)]   # (seed, cover_strength) — escalate toward the voice if the lyric pulls register off
+# STYLE TRANSFER is the production mechanism — measured, it breaks cover mode's two-knob trap:
+# text2music + reference_audio keeps the words text-driven (89% at strength 0.2 where cover mode
+# managed 71%) while the reference biases timbre (male median 145.9 Hz at 0.35, spread 7.14 st —
+# the healthy single-lead texture). Ordered so better words ship if the register holds:
+# 0.30 is the interpolated sweet spot, 0.35 the proven-male fallback, then a fresh seed.
+CANDIDATES = [(4343, 0.30), (4343, 0.35), (4444, 0.35)]   # (seed, cover_strength) — escalate toward the voice if the lyric pulls register off
 WINNER, WINNER_ACC, gate_log = None, None, []
 for seed, strength in CANDIDATES:
     name = f"cand{seed}"
@@ -300,7 +305,8 @@ for seed, strength in CANDIDATES:
         "save_dir": str(TMP / f"out_{name}"), "audio_format": "flac", "device": "cuda",
         "offload_to_cpu": chosen["offload_to_cpu"],
         "offload_dit_to_cpu": chosen["offload_dit_to_cpu"],
-        "task_type": "cover", "src_audio": MALE_REF, "audio_cover_strength": strength,
+        "task_type": "text2music", "reference_audio": MALE_REF,
+        "audio_cover_strength": strength,
         "caption": CAPTION, "lyrics": LYRICS, "instrumental": False,
         "bpm": BPM, "keyscale": KEYSCALE, "timesignature": "4/4", "vocal_language": "en",
         "duration": DURATION, "inference_steps": 80, "guidance_scale": 7.5,
