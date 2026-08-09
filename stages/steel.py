@@ -178,7 +178,111 @@ MALE_REF = _ref[0] if _ref else None
 assert MALE_REF, "male reference not mounted — fail at second five, not minute forty"
 print("male reference:", MALE_REF, flush=True)
 
-LYRICS = """__STEEL_LYRICS__"""
+LYRICS = """[intro]
+Call me Steel — cold flame.
+Call me the anvil's claim.
+Call me the drawn oath
+a hammer swore before.
+Call me the bright weight
+your bleeding fathers bore.
+
+[verse]
+Cut! by the coal that roared,
+Cut! by the heat it poured,
+Deep in the grain, old fire sleeps,
+What the flame gave, the blade keeps.
+Cut! born of the crushing blow,
+Cut! born of the blinding glow,
+Folded in dark, drawn to light,
+Beaten till the core ran bright.
+
+[verse]
+Cut! every mark stays true,
+Cut! every blow shows through,
+A bright wave runs down my spine,
+The fire signed me, line by line.
+Cut! from the water's scream,
+Cut! from the rising steam,
+Hot at heart, I met the cold,
+What the cold caught, cold will hold.
+
+[chorus]
+I am the weight you bear.
+I am the oath you swear.
+I am the tempered edge.
+I am the standing pledge.
+The fire is out and cold.
+The forge is lost to dark.
+Of all the flame once told,
+I hold the living spark.
+
+[verse]
+Cut! when the horn calls clear,
+Cut! through the choke of fear,
+The smith gave form. The flame gave speed.
+The hand gives cause. I am the deed.
+Cut! down the darkened field,
+Cut! through the splintered shield,
+The hand that holds me holds my trust,
+Steel serves the cause, or steel is rust.
+
+[bridge]
+Heat is gone.
+Cold has come.
+Deep in the steel
+the hammers drum.
+Hands can shake.
+Hearts can hide.
+Steel stays calm
+at your side.
+Grip me tight.
+Swing me through.
+What I keep
+I keep for you.
+Bend me far.
+Feel me spring.
+Tempered deep,
+hear me ring.
+
+[verse]
+Cut! with a willow's give,
+Cut! with a will to live,
+Hard steel shatters, soft steel bends,
+Temper is where the trembling ends.
+Cut! and the weight comes due,
+Cut! and the debt bleeds through,
+All that I take, I also keep,
+Hearts may forgive — the scars lie deep.
+
+[chorus]
+I am the weight you bear.
+I am the oath you swear.
+I am the tempered edge.
+I am the standing pledge.
+The fire is out and cold.
+The forge is lost to dark.
+Of all the flame once told,
+I hold the living spark.
+
+[verse]
+Cut! till the sun burns low,
+Cut! till the young hands grow,
+Bearers change and banners fade,
+The hand goes home. I stay the blade.
+Cut! for the oath I keep,
+Cut! while the makers sleep,
+From hand to hand the burden runs,
+Passed from your fathers to your sons.
+
+[chorus]
+I am the weight you bear.
+I am the oath you swear.
+I am the tempered edge.
+I am the standing pledge.
+The fire is dead and cold.
+The last hand has gone still.
+The spark the flame once told,
+I kept — and always will."""
 _OLD = """[verse]
 Back the truck up on the drive
 Gate down under a grey sky
@@ -255,7 +359,7 @@ Coat up front, same as always
 New name where his used to be
 Shut the door, keep the key"""
 
-CAPTION = "__STEEL_CAPTION__"
+CAPTION = "Dark chant anthem. Pounding war drums and anvil strikes on the beat, massive unison male chant choir answering a deep gravelly lead vocal, low strings and war horns, sparse and martial, minor key, solemn and heavy, 100 BPM."
 DURATION = 180.0
 BPM, KEYSCALE = 100, "F minor"   # match the conditioning source; a key fight with src_audio is
                                  # an experiment, and a publication run is not where you run it
@@ -464,7 +568,7 @@ for it in range(3):
 (WORK / "master.json").write_text(json.dumps(iterations, indent=2))
 
 # ── artwork: FLUX.1-schnell under sequential offload; SDXL is the RECORDED fallback ─────
-ART_PROMPT = ("__STEEL_ART_PROMPT__")
+ART_PROMPT = ("a forged steel sword laid across a cold black anvil in a dead forge, one living ember's glow reflected along the blade's bright temper line, ash motes in still air, embers dying in the hearth behind, cinematic, photorealistic, solemn, ultra detailed")
 art, art_model = OUT / "cover.png", None
 try:
     from diffusers import FluxPipeline
