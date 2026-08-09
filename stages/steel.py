@@ -486,10 +486,13 @@ if WINNER is None:
         # first repair attempt. Isolation, then force the cu126 torch line the P100 needs —
         # seed-vc's own pin would pull wheels with no sm_60 kernels.
         sh("git clone -q https://github.com/Plachtaa/seed-vc /tmp/seedvc")
-        sh("python -m venv /tmp/svcenv && "
-           ". /tmp/svcenv/bin/activate && "
-           "pip install -q -r /tmp/seedvc/requirements.txt 2>&1 | tail -2 && "
-           "pip install -q --force-reinstall torch==2.7.1 torchaudio==2.7.1 "
+        # Isolation WITHOUT venv: Kaggle's image ships a python whose ensurepip is broken, so
+        # `python -m venv` dies bootstrapping pip. pip --target + PYTHONPATH gives the child
+        # process its own package tree (prepended, so its transformers wins) while the parent
+        # environment stays untouched — the clash that killed repair attempt #1.
+        sh("pip install -q --target /tmp/svcdeps -r /tmp/seedvc/requirements.txt 2>&1 | tail -2")
+        sh("pip install -q --target /tmp/svcdeps --upgrade --force-reinstall "
+           "torch==2.7.1 torchaudio==2.7.1 "
            "--index-url https://download.pytorch.org/whl/cu126 2>&1 | tail -1")
         cand = OUT / f"cand{best['seed']}.mp3"
         stem = _vocal_stem(str(cand))
@@ -501,7 +504,7 @@ if WINNER is None:
         mix, sr_ = sf.read("/tmp/_mix.wav"); voc, _ = sf.read(stem)
         n = min(len(mix), len(voc)); sf.write(acc_wav, mix[:n] - voc[:n], sr_)
         conv_dir = "/tmp/svc_out"
-        rc = sh(f"cd /tmp/seedvc && /tmp/svcenv/bin/python inference.py --source '{stem}' "
+        rc = sh(f"cd /tmp/seedvc && PYTHONPATH=/tmp/svcdeps python inference.py --source '{stem}' "
                 f"--target '{MALE_REF}' --output {conv_dir} "
                 f"--diffusion-steps 50 --length-adjust 1.0 --inference-cfg-rate 0.7 "
                 f"--f0-condition True --auto-f0-adjust True > /tmp/svc.log 2>&1")
