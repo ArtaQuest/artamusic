@@ -494,6 +494,15 @@ if WINNER is None:
         sh("pip install -q --target /tmp/svcdeps --upgrade --force-reinstall "
            "torch==2.7.1 torchaudio==2.7.1 "
            "--index-url https://download.pytorch.org/whl/cu126 2>&1 | tail -1")
+        # seed-vc's requirements pull the PyPI 'typing' backport, which SHADOWS the stdlib on
+        # any modern python: 'Callable has no attribute _abc_registry' at interpreter start.
+        # Reproduced and cured locally before this line was written. dataclasses is the same
+        # hazard class. The canary import proves the tree is clean BEFORE the expensive part.
+        sh("rm -rf /tmp/svcdeps/typing /tmp/svcdeps/typing-* /tmp/svcdeps/dataclasses*")
+        rc0 = sh("PYTHONPATH=/tmp/svcdeps python -c 'import typing, dataclasses, numpy, torch; "
+                 "print(\"svcdeps tree clean, torch\", torch.__version__)'")
+        if rc0:
+            print("svcdeps tree still poisoned — refusing the conversion attempt", flush=True)
         cand = OUT / f"cand{best['seed']}.mp3"
         stem = _vocal_stem(str(cand))
         # accompaniment = mix minus vocal, phase-aligned by construction (same separation)
@@ -504,7 +513,7 @@ if WINNER is None:
         mix, sr_ = sf.read("/tmp/_mix.wav"); voc, _ = sf.read(stem)
         n = min(len(mix), len(voc)); sf.write(acc_wav, mix[:n] - voc[:n], sr_)
         conv_dir = "/tmp/svc_out"
-        rc = sh(f"cd /tmp/seedvc && PYTHONPATH=/tmp/svcdeps python inference.py --source '{stem}' "
+        rc = 1 if rc0 else sh(f"cd /tmp/seedvc && PYTHONPATH=/tmp/svcdeps python inference.py --source '{stem}' "
                 f"--target '{MALE_REF}' --output {conv_dir} "
                 f"--diffusion-steps 50 --length-adjust 1.0 --inference-cfg-rate 0.7 "
                 f"--f0-condition True --auto-f0-adjust True > /tmp/svc.log 2>&1")
