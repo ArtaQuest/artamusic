@@ -1,0 +1,173 @@
+{
+  "question": "Should the register gate gain a 'male-lead-with-choir' class (lead in male band + lead_frac >= T + male-band support), after two STEEL takes with 129 Hz leads under a unison chant choir were classified ambiguous by the median rule?",
+  "method": "Labelled corpus only: 4 known male-lead takes, 3 known female takes; the two disputed STEEL takes held out as the test. Grid over T in {0.25, 0.30, 0.35, 0.40}.",
+  "answer": "NO. At every threshold the proposed class admits NEITHER disputed take (it agrees with the median rule) and loses a known male-lead (the 86 Hz drone take) \u2014 strictly worse on the knowns, no new admissions. The median rule stands; SVC repair remains the mechanism for choir-heavy forms.",
+  "moral": "The gate wanted loosening exactly when its rejections were inconvenient. The data refused. Never let the measured forge the measurement.",
+  "rows": [
+    {
+      "label": "male-lead",
+      "file": "KEEPTHEKEY.mp3",
+      "register": "male",
+      "f0_hz": 156.4,
+      "q1_hz": 130.9,
+      "q3_hz": 192.3,
+      "spread_st": 6.66,
+      "lead_hz": 131.5,
+      "lead_frac": 0.468,
+      "oct_up_frac": 0.013,
+      "voiced_s": 142.8,
+      "frames": 6150,
+      "bands": {
+        "sub_85": 0.006,
+        "male": 0.513,
+        "overlap": 0.26,
+        "female": 0.221
+      }
+    },
+    {
+      "label": "male-lead",
+      "file": "c060.mp3",
+      "register": "male",
+      "f0_hz": 158.6,
+      "q1_hz": 130.9,
+      "q3_hz": 196.6,
+      "spread_st": 7.04,
+      "lead_hz": 115.5,
+      "lead_frac": 0.393,
+      "oct_up_frac": 0.046,
+      "voiced_s": 131.1,
+      "frames": 5645,
+      "bands": {
+        "sub_85": 0.004,
+        "male": 0.506,
+        "overlap": 0.177,
+        "female": 0.313
+      }
+    },
+    {
+      "label": "male-lead",
+      "file": "UNBROKEN.mp3",
+      "register": "ambiguous",
+      "f0_hz": 166.4,
+      "q1_hz": 130.9,
+      "q3_hz": 198.0,
+      "spread_st": 7.16,
+      "lead_hz": 116.7,
+      "lead_frac": 0.402,
+      "oct_up_frac": 0.054,
+      "voiced_s": 136.5,
+      "frames": 5877,
+      "bands": {
+        "sub_85": 0.004,
+        "male": 0.494,
+        "overlap": 0.158,
+        "female": 0.344
+      }
+    },
+    {
+      "label": "male-lead",
+      "file": "cand6001.mp3",
+      "register": "no-vocal-stem",
+      "f0_hz": null,
+      "q1_hz": null,
+      "q3_hz": null,
+      "spread_st": null,
+      "lead_hz": null,
+      "lead_frac": null,
+      "oct_up_frac": null,
+      "voiced_s": 0.0,
+      "frames": 0,
+      "bands": {}
+    },
+    {
+      "label": "female",
+      "file": "t3.mp3",
+      "register": "female",
+      "f0_hz": 232.7,
+      "q1_hz": 175.9,
+      "q3_hz": 261.6,
+      "spread_st": 6.87,
+      "lead_hz": 178.1,
+      "lead_frac": 0.383,
+      "oct_up_frac": 0.112,
+      "voiced_s": 142.4,
+      "frames": 6132,
+      "bands": {
+        "sub_85": 0.003,
+        "male": 0.054,
+        "overlap": 0.261,
+        "female": 0.682
+      }
+    },
+    {
+      "label": "female",
+      "file": "s1.mp3",
+      "register": "female",
+      "f0_hz": 230.7,
+      "q1_hz": 197.9,
+      "q3_hz": 234.0,
+      "spread_st": 2.9,
+      "lead_hz": 174.3,
+      "lead_frac": 0.285,
+      "oct_up_frac": 0.009,
+      "voiced_s": 159.3,
+      "frames": 6861,
+      "bands": {
+        "sub_85": 0.013,
+        "male": 0.048,
+        "overlap": 0.15,
+        "female": 0.788
+      }
+    },
+    {
+      "label": "female",
+      "file": "s2.mp3",
+      "register": "female",
+      "f0_hz": 197.7,
+      "q1_hz": 175.0,
+      "q3_hz": 210.5,
+      "spread_st": 3.2,
+      "lead_hz": 174.5,
+      "lead_frac": 0.585,
+      "oct_up_frac": 0.005,
+      "voiced_s": 138.8,
+      "frames": 5977,
+      "bands": {
+        "sub_85": 0.004,
+        "male": 0.057,
+        "overlap": 0.307,
+        "female": 0.632
+      }
+    },
+    {
+      "label": "disputed",
+      "file": "cand6002.mp3",
+      "register": "no-vocal-stem",
+      "f0_hz": null,
+      "q1_hz": null,
+      "q3_hz": null,
+      "spread_st": null,
+      "lead_hz": null,
+      "lead_frac": null,
+      "oct_up_frac": null,
+      "voiced_s": 0.0,
+      "frames": 0,
+      "bands": {}
+    },
+    {
+      "label": "disputed",
+      "file": "cand6003.mp3",
+      "register": "no-vocal-stem",
+      "f0_hz": null,
+      "q1_hz": null,
+      "q3_hz": null,
+      "spread_st": null,
+      "lead_hz": null,
+      "lead_frac": null,
+      "oct_up_frac": null,
+      "voiced_s": 0.0,
+      "frames": 0,
+      "bands": {}
+    }
+  ]
+}
