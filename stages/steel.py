@@ -481,8 +481,16 @@ if WINNER is None:
         best = max(repairable, key=lambda r: r["word_accuracy"])
         print(f"\nSVC REPAIR: converting seed {best['seed']}'s vocal to the male reference "
               f"(zero-shot Seed-VC) — deterministic register instead of another seed roll", flush=True)
-        sh("git clone -q https://github.com/Plachtaa/seed-vc /tmp/seedvc && "
-           "pip install -q -r /tmp/seedvc/requirements.txt 2>&1 | tail -1")
+        # Seed-VC gets its OWN venv: installing its requirements into the shared environment
+        # broke transformers mid-run (RuntimeError importing modeling_whisper) and killed the
+        # first repair attempt. Isolation, then force the cu126 torch line the P100 needs —
+        # seed-vc's own pin would pull wheels with no sm_60 kernels.
+        sh("git clone -q https://github.com/Plachtaa/seed-vc /tmp/seedvc")
+        sh("python -m venv /tmp/svcenv && "
+           ". /tmp/svcenv/bin/activate && "
+           "pip install -q -r /tmp/seedvc/requirements.txt 2>&1 | tail -2 && "
+           "pip install -q --force-reinstall torch==2.7.1 torchaudio==2.7.1 "
+           "--index-url https://download.pytorch.org/whl/cu126 2>&1 | tail -1")
         cand = OUT / f"cand{best['seed']}.mp3"
         stem = _vocal_stem(str(cand))
         # accompaniment = mix minus vocal, phase-aligned by construction (same separation)
@@ -493,10 +501,12 @@ if WINNER is None:
         mix, sr_ = sf.read("/tmp/_mix.wav"); voc, _ = sf.read(stem)
         n = min(len(mix), len(voc)); sf.write(acc_wav, mix[:n] - voc[:n], sr_)
         conv_dir = "/tmp/svc_out"
-        rc = sh(f"cd /tmp/seedvc && python inference.py --source '{stem}' "
+        rc = sh(f"cd /tmp/seedvc && /tmp/svcenv/bin/python inference.py --source '{stem}' "
                 f"--target '{MALE_REF}' --output {conv_dir} "
                 f"--diffusion-steps 50 --length-adjust 1.0 --inference-cfg-rate 0.7 "
-                f"--f0-condition True --auto-f0-adjust True")
+                f"--f0-condition True --auto-f0-adjust True > /tmp/svc.log 2>&1")
+        if rc:
+            print("SVC log tail:", Path("/tmp/svc.log").read_text()[-600:], flush=True)
         conv = sorted(Path(conv_dir).glob("*.wav"), key=lambda q: q.stat().st_mtime)
         if rc == 0 and conv:
             fixed = OUT / f"cand{best['seed']}_svc.mp3"
