@@ -505,7 +505,15 @@ if WINNER is None:
         sh("rm -f /tmp/svcdeps/typing.py /tmp/svcdeps/dataclasses.py && "
            "rm -rf /tmp/svcdeps/typing-*.dist-info /tmp/svcdeps/dataclasses-*.dist-info "
            "/tmp/svcdeps/typing /tmp/svcdeps/dataclasses")
-        rc0 = sh("PYTHONPATH=/tmp/svcdeps python -c 'import typing, dataclasses, numpy, torch; "
+        # Same disease, second organ: PYTHONPATH half-isolation MIXES trees — anything absent
+        # from the overlay falls through to the system tree. v5 died on lib.GEN_EMAIL: the
+        # overlay's pyOpenSSL against the system's cryptography (or vice versa) — a version
+        # pair that must come from ONE tree. Remove the pair from the overlay entirely; the
+        # system's matched pair serves both.
+        sh("rm -rf /tmp/svcdeps/OpenSSL /tmp/svcdeps/pyOpenSSL* /tmp/svcdeps/pyopenssl* "
+           "/tmp/svcdeps/cryptography /tmp/svcdeps/cryptography-*")
+        rc0 = sh("PYTHONPATH=/tmp/svcdeps python -c 'import typing, dataclasses, numpy, torch, "
+                 "OpenSSL, yaml, librosa, soundfile, transformers; "
                  "print(\"svcdeps tree clean, torch\", torch.__version__)'")
         if rc0:
             print("svcdeps tree still poisoned — refusing the conversion attempt", flush=True)
