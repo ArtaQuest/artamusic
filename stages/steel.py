@@ -498,7 +498,13 @@ if WINNER is None:
         # any modern python: 'Callable has no attribute _abc_registry' at interpreter start.
         # Reproduced and cured locally before this line was written. dataclasses is the same
         # hazard class. The canary import proves the tree is clean BEFORE the expensive part.
-        sh("rm -rf /tmp/svcdeps/typing /tmp/svcdeps/typing-* /tmp/svcdeps/dataclasses*")
+        # The backport is a BARE FILE (typing.py), not a package directory — v4's canary caught
+        # exactly this after an rm aimed at a directory missed it. Remove the file and its
+        # dist-info by name; NEVER glob 'typing*' here, that would take typing_extensions with
+        # it, which seed-vc legitimately needs.
+        sh("rm -f /tmp/svcdeps/typing.py /tmp/svcdeps/dataclasses.py && "
+           "rm -rf /tmp/svcdeps/typing-*.dist-info /tmp/svcdeps/dataclasses-*.dist-info "
+           "/tmp/svcdeps/typing /tmp/svcdeps/dataclasses")
         rc0 = sh("PYTHONPATH=/tmp/svcdeps python -c 'import typing, dataclasses, numpy, torch; "
                  "print(\"svcdeps tree clean, torch\", torch.__version__)'")
         if rc0:
@@ -517,7 +523,7 @@ if WINNER is None:
                 f"--target '{MALE_REF}' --output {conv_dir} "
                 f"--diffusion-steps 50 --length-adjust 1.0 --inference-cfg-rate 0.7 "
                 f"--f0-condition True --auto-f0-adjust True > /tmp/svc.log 2>&1")
-        if rc:
+        if rc and Path("/tmp/svc.log").exists():
             print("SVC log tail:", Path("/tmp/svc.log").read_text()[-600:], flush=True)
         conv = sorted(Path(conv_dir).glob("*.wav"), key=lambda q: q.stat().st_mtime)
         if rc == 0 and conv:
