@@ -573,10 +573,11 @@ def master_once(src_mp3, ceiling_db):
     sh(f"ffmpeg -v error -i '{wav}' -codec:a libmp3lame -b:a 320k '{mp3}' -y", quiet=True)
     return M.loudness(mp3)
 
-# Reference-matching pre-stage (research: Matchering 2.0, limiter/normalize OFF so our proven
-# finisher stays the only dynamics authority). Optional by design: on any failure the winner
-# proceeds unmatched, recorded.
-MATCH_IN = WINNER
+# Two master candidates: A = matchering-matched (house tonal balance), B = direct. v6 proved
+# the matched path can cost 8+ points of words on an SVC vocal — which master is right is a
+# MEASUREMENT, not a default. Both are produced; verify words on both; the better passing one
+# ships and the choice is recorded.
+MATCH_IN = None
 try:
     sh("pip install -q matchering 2>&1 | tail -1")
     import matchering as mg
@@ -586,21 +587,45 @@ try:
                results=[mg.Result("/tmp/_matched.wav", "FLOAT",
                                   use_limiter=False, normalize=False)])
     MATCH_IN = "/tmp/_matched.wav"
-    print("matchering pre-stage applied (house-sound reference)", flush=True)
 except Exception as e:
-    print(f"matchering skipped ({str(e)[:80]}) — winner proceeds unmatched", flush=True)
+    print(f"matchering unavailable ({str(e)[:80]}) — direct master only", flush=True)
 
-ceiling, iterations = TARGET_TP, []
-for it in range(3):
-    got = master_once(MATCH_IN, ceiling)
-    iterations.append({"ceiling_db": round(ceiling, 2), **{k: got.get(k) for k in
-                       ("lufs", "lra_lu", "true_peak_dbtp", "peak_dbfs", "clipped")}})
-    tp = got.get("true_peak_dbtp")
-    print(f"master pass {it+1}: {iterations[-1]}", flush=True)
-    if tp is None or tp <= TARGET_TP + 0.05:
-        break
-    # The encoder overshoots; lower the ceiling by the measured excess plus margin and go again.
-    ceiling -= (tp - TARGET_TP) + 0.1
+def finish(src, wav_out, mp3_out):
+    ceiling, iters = TARGET_TP, []
+    for it in range(3):
+        a = M.loudness(src)
+        g = TARGET_LUFS - (a["lufs"] if a["lufs"] is not None else -14.0)
+        lim = 10 ** (ceiling / 20)
+        af = (f"volume={g:.2f}dB,aresample=176400,"
+              f"alimiter=limit={lim:.5f}:level=disabled,aresample=44100")
+        sh(f"ffmpeg -v error -i '{src}' -af '{af}' -ar 44100 '{wav_out}' -y", quiet=True)
+        sh(f"ffmpeg -v error -i '{wav_out}' -codec:a libmp3lame -b:a 320k '{mp3_out}' -y", quiet=True)
+        got = M.loudness(mp3_out)
+        iters.append({"ceiling_db": round(ceiling, 2), **{k: got.get(k) for k in
+                      ("lufs", "lra_lu", "true_peak_dbtp", "peak_dbfs", "clipped")}})
+        tp = got.get("true_peak_dbtp")
+        if tp is None or tp <= TARGET_TP + 0.05:
+            break
+        ceiling -= (tp - TARGET_TP) + 0.1
+    return iters
+
+arms = {}
+finish(str(WINNER), str(OUT / "_direct.wav"), str(OUT / "_direct.mp3"))
+arms["direct"] = {"wav": str(OUT / "_direct.wav"), "mp3": str(OUT / "_direct.mp3")}
+if MATCH_IN:
+    finish(MATCH_IN, str(OUT / "_matched.wav"), str(OUT / "_matched.mp3"))
+    arms["matched"] = {"wav": str(OUT / "_matched.wav"), "mp3": str(OUT / "_matched.mp3")}
+
+scores = {}
+for name, files in arms.items():
+    st = _vocal_stem(files["mp3"])
+    scores[name] = {"words": round(word_accuracy(files["mp3"], LYRICS, stem=st), 3)}
+    print(f"master arm {name}: words {scores[name]['words']*100:.1f}%", flush=True)
+best = max(arms, key=lambda k: scores[k]["words"])
+print(f"master choice by measurement: {best}", flush=True)
+import shutil
+shutil.copy(arms[best]["wav"], wav); shutil.copy(arms[best]["mp3"], mp3)
+iterations = [{"arm_chosen": best, "arm_scores": scores}]
 (WORK / "master.json").write_text(json.dumps(iterations, indent=2))
 
 # ── artwork: FLUX.1-schnell under sequential offload; SDXL is the RECORDED fallback ─────
