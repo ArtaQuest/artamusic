@@ -135,6 +135,9 @@ def metal_mask(img_lin, depth):
 
 
 # ── Stage B: the heat field ─────────────────────────────────────────────────────────────
+REF_H = 360.0   # the resolution these constants were tuned at
+
+
 class HeatField:
     """Temperature + velocity on a coarse grid, stepped once per frame.
 
@@ -144,8 +147,9 @@ class HeatField:
     and cost the hardest-to-debug component in the pipeline.
     """
 
-    def __init__(self, h, w, mask, device, gen):
+    def __init__(self, h, w, mask, device, gen, scale=1.0):
         self.h, self.w, self.dev = h, w, device
+        self.scale = scale        # all velocities are px/s at REF_H; scale to this frame
         self.T = torch.zeros(h, w, device=device)
         self.vx = torch.zeros(h, w, device=device)
         self.vy = torch.zeros(h, w, device=device)
@@ -185,11 +189,11 @@ class HeatField:
 
     def step(self, e_forge, t, dt=1.0 / FPS):
         self.T = self.T + dt * 6.0 * self.M * (0.30 + 0.70 * float(e_forge))
-        self.vy = self.vy - dt * 9.0 * self.T                     # buoyancy (−y is up)
+        self.vy = self.vy - dt * 9.0 * self.scale * self.T                     # buoyancy (−y is up)
         cx, cy = self._curl(t)
         amp = 0.5 + 1.5 * self.T                                  # turbulence only where hot
-        self.vx = self.vx + dt * cx * amp * 44.0   # px/s, measured: 22 gave TI 5.4, target 8-15
-        self.vy = self.vy + dt * cy * amp * 44.0
+        self.vx = self.vx + dt * cx * amp * 44.0 * self.scale   # px/s, measured: 22 gave TI 5.4, target 8-15
+        self.vy = self.vy + dt * cy * amp * 44.0 * self.scale
         self.T = self._advect(self.T, dt)
         vx_new = self._advect(self.vx, dt)
         self.vy = self._advect(self.vy, dt)
@@ -229,8 +233,9 @@ def bloom(x, device):
 class Embers:
     """A fixed-budget particle system riding the same velocity field as the heat."""
 
-    def __init__(self, n, H, W, device, gen):
+    def __init__(self, n, H, W, device, gen, scale=1.0):
         self.n, self.H, self.W, self.dev = n, H, W, device
+        self.scale = scale
         self.pos = torch.zeros(n, 2, device=device)
         self.vel = torch.zeros(n, 2, device=device)
         self.age = torch.full((n,), 1e9, device=device)     # all dead at t=0
@@ -239,7 +244,7 @@ class Embers:
 
     def step(self, T, e_onset, dt=1.0 / FPS):
         dead = (self.age >= self.life).nonzero(as_tuple=True)[0]
-        want = int(math.ceil(120 * float(e_onset)))
+        want = int(math.ceil(120 * self.scale * float(e_onset)))
         if want and len(dead):
             k = min(want, len(dead))
             idx = dead[:k]
@@ -249,15 +254,15 @@ class Embers:
                 pick = torch.multinomial(flat / tot, k, replacement=True, generator=self.gen)
                 self.pos[idx, 0] = (pick % T.shape[1]).float() * (self.W / T.shape[1])
                 self.pos[idx, 1] = (pick // T.shape[1]).float() * (self.H / T.shape[0])
-                self.vel[idx, 0] = torch.randn(k, generator=self.gen, device=self.dev) * 14.0
-                self.vel[idx, 1] = -30.0 - torch.rand(k, generator=self.gen, device=self.dev) * 55.0
+                self.vel[idx, 0] = torch.randn(k, generator=self.gen, device=self.dev) * 14.0 * self.scale
+                self.vel[idx, 1] = (-30.0 - torch.rand(k, generator=self.gen, device=self.dev) * 55.0) * self.scale
                 self.age[idx] = 0.0
                 self.life[idx] = 1.2 + torch.rand(k, generator=self.gen, device=self.dev) * 2.3
 
         live = self.age < self.life
-        self.vel[live, 1] -= dt * 22.0                       # buoyant rise
+        self.vel[live, 1] -= dt * 22.0 * self.scale                       # buoyant rise
         self.vel[live] += torch.randn(int(live.sum()), 2, generator=self.gen,
-                                      device=self.dev) * 3.0 * dt * FPS
+                                      device=self.dev) * 3.0 * self.scale * dt * FPS
         self.pos[live] += self.vel[live] * dt
         self.age[live] += dt
         off = ((self.pos[:, 0] < 0) | (self.pos[:, 0] >= self.W) |
@@ -281,10 +286,13 @@ class Embers:
         alpha = (1 - frac) ** 1.5
         xi = self.pos[live, 0].long().clamp(1, self.W - 2)
         yi = self.pos[live, 1].long().clamp(1, self.H - 2)
-        for dy in (-1, 0, 1):
-            for dx in (-1, 0, 1):
-                w = 1.0 if (dx == 0 and dy == 0) else (0.5 if dx == 0 or dy == 0 else 0.25)
-                lin = (yi + dy) * self.W + (xi + dx)
+        rad = max(1, int(round(self.scale)))
+        rng = range(-rad, rad + 1)
+        for dy in rng:
+            for dx in rng:
+                r2 = (dx * dx + dy * dy) / float(rad * rad)
+                w = math.exp(-2.0 * r2)
+                lin = ((yi + dy).clamp(0, self.H - 1)) * self.W + ((xi + dx).clamp(0, self.W - 1))
                 for c in range(3):
                     buf[c].view(-1).index_put_((lin,), col[c] * alpha * w * 6.5, accumulate=True)
         return buf
@@ -318,7 +326,8 @@ def render(image, audio, out, seconds=180.0, preview=False, device="cpu"):
 
     env = envelopes(audio, n_frames, seconds=seconds)
     gh, gw = H // 2, W // 2
-    field = HeatField(gh, gw, M, device, gen)
+    scale = H / REF_H
+    field = HeatField(gh, gw, M, device, gen, scale)
     for _ in range(240):                                   # warm-up: open on an established plume
         field.step(float(np.median(env["forge"])), 0.0)
 
@@ -326,15 +335,26 @@ def render(image, audio, out, seconds=180.0, preview=False, device="cpu"):
                             torch.arange(W, device=device, dtype=torch.float32), indexing="ij")
     dmed = depth.median()
     grain_tile = torch.randn(512, 512, generator=gen).to(device)
-    embers = Embers(9000, H, W, device, gen)
+    embers = Embers(int(9000 * scale), H, W, device, gen, scale)
 
-    proc = subprocess.Popen(
-        f"ffmpeg -v error -f rawvideo -pix_fmt rgb24 -s {W}x{H} -r {FPS} -i - "
-        f"-i '{audio}' -c:v libx264 -preset medium -crf 16 -pix_fmt yuv420p "
-        f"-c:a aac -b:a 256k -shortest '{out}' -y",
-        shell=True, stdin=subprocess.PIPE)
+    seg_dir = Path("/tmp/_forgeseg"); seg_dir.mkdir(exist_ok=True)
+    seg_frames = FPS * 15                       # 15 s segments: ~90 MB of h264 each
+    seg_idx, proc, segs = -1, None, []
+
+    def open_segment(i):
+        f = seg_dir / f"seg{i:04d}.mp4"
+        segs.append(f)
+        return subprocess.Popen(
+            f"ffmpeg -v error -f rawvideo -pix_fmt rgb24 -s {W}x{H} -r {FPS} -i - "
+            f"-an -c:v libx264 -preset medium -crf 16 -pix_fmt yuv420p '{f}' -y",
+            shell=True, stdin=subprocess.PIPE)
 
     for n in range(n_frames):
+        if n // seg_frames != seg_idx:
+            if proc is not None:
+                proc.stdin.close(); proc.wait()
+            seg_idx = n // seg_frames
+            proc = open_segment(seg_idx)
         t = n / FPS
         field.step(env["forge"][n], t)
         T = F.interpolate(field.T[None, None], size=(H, W), mode="bilinear",
@@ -373,14 +393,23 @@ def render(image, audio, out, seconds=180.0, preview=False, device="cpu"):
         lit = lit + 0.006 * g[None]
 
         frame = (linear_to_srgb(lit).clamp(0, 1) * 255).to(torch.uint8)
-        proc.stdin.write(frame.permute(1, 2, 0).cpu().numpy().tobytes())
+        proc.stdin.write(frame.permute(1, 2, 0).contiguous().cpu().numpy().tobytes())
         if n % (FPS * 20) == 0:
             print(f"  {t:6.1f}s  T_max {float(T.max()):.2f}  forge {env['forge'][n]:.2f}",
                   flush=True)
+        del base, Mw, E, B, lit, T, frame   # after the print that reads T, not before
 
     proc.stdin.close()
     proc.wait()
-    print(f"wrote {out}", flush=True)
+    # concatenate the segments and lay the audio on once, at the end
+    lst = seg_dir / "segs.txt"
+    lst.write_text("".join(f"file '{f}'\n" for f in segs))
+    _sh(f"ffmpeg -v error -f concat -safe 0 -i '{lst}' -i '{audio}' "
+        f"-c:v copy -c:a aac -b:a 256k -shortest '{out}' -y")
+    for f in segs:
+        f.unlink(missing_ok=True)
+    lst.unlink(missing_ok=True)
+    print(f"wrote {out} ({len(segs)} segments)", flush=True)
     return out
 
 
