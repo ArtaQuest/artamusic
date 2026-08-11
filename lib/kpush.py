@@ -127,6 +127,51 @@ def to_ipynb(py, out):
                      "language": "python"}, "language_info": {"name": "python"}}}, indent=1))
     return out
 
+def push_verified(slug, title, py, public=False, sources=(), tries=6):
+    """Push, then READ BACK the pushed metadata and confirm the mounts actually took.
+
+    Three kernels in a row died at their own mount assert because a push was assumed to have
+    landed: once the --kernel-source flag was omitted, once the push output was swallowed by an
+    SSL error mid-request, once the wrong OWNER was named (the source kernel ran on a different
+    account). The assert was right every time; the push was not verified. This makes verification
+    the only way to push, so the failure mode cannot recur.
+    """
+    import json as _j, subprocess as _sp, sys as _sys, tempfile as _tf, time as _t
+    args = [_sys.executable, str(HERE / "kpush.py"), "push", slug, "--title", title, "--py", py]
+    if public:
+        args.append("--public")
+    for s_ in sources:
+        args += ["--kernel-source", s_]
+    for attempt in range(tries):
+        r = _sp.run(args, capture_output=True, text=True, cwd=str(HERE))
+        out = (r.stdout + r.stderr).strip()
+        last = out.splitlines()[-1][:120] if out else "?"
+        print(f"push {slug} attempt {attempt}: {last}", flush=True)
+        # A readback alone is not proof the push LANDED: kernel metadata persists from earlier
+        # pushes, so a slot-limited failure can pass mount verification on stale data. Detect the
+        # refusals explicitly and keep waiting rather than reporting a verified no-op.
+        if "Maximum batch" in out or "quota" in out.lower():
+            print("  refused (no free slot / quota) — waiting, not verifying", flush=True)
+            _t.sleep(300)
+            continue
+        _t.sleep(20)
+        try:
+            a = api()
+            d = _tf.mkdtemp()
+            call(a.kernels_pull, f"{owner()}/{slug}", d, metadata=True, quiet=True)
+            m = _j.load(open(f"{d}/kernel-metadata.json"))
+            got = m.get("kernel_sources") or []
+            print(f"  kernel_sources={got} is_private={m.get('is_private')}", flush=True)
+            if set(got) >= set(sources):
+                print(f"  VERIFIED: {slug} has every requested mount", flush=True)
+                return True
+            print("  mounts MISSING — retrying", flush=True)
+        except Exception as e:
+            print(f"  readback failed: {str(e)[:70]}", flush=True)
+        _t.sleep(45)
+    raise RuntimeError(f"{slug}: could not verify mounts after {tries} attempts")
+
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("cmd", choices=["push", "status", "log"]); p.add_argument("slug")
