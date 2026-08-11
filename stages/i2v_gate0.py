@@ -24,8 +24,12 @@ os.environ["HF_HOME"] = "/kaggle/temp/hf"
 TMP = Path("/tmp/aq"); TMP.mkdir(parents=True, exist_ok=True)
 WORK = Path("/kaggle/working")
 
-SINGLE_FILE = ("https://huggingface.co/Lightricks/LTX-Video/resolve/"
-               "8984fa25007f376c1a299016d0957a37a2f797bb/ltxv-2b-0.9.8-distilled.safetensors")
+# Download explicitly at the pinned revision, then hand from_single_file a LOCAL PATH.
+# Passing a full https:// URL made diffusers treat it as repo-relative and request
+# .../resolve/main/resolve/<sha>/... -> 404. Verified live: the pinned URL is 200, 5.91 GB.
+LTX_REPO = "Lightricks/LTX-Video"
+LTX_REV = "8984fa25007f376c1a299016d0957a37a2f797bb"
+LTX_FILE = "ltxv-2b-0.9.8-distilled.safetensors"
 
 def sh(c, quiet=False):
     if not quiet: print(f"$ {c[:150]}", flush=True)
@@ -63,7 +67,16 @@ print("still:", STILL, flush=True)
 
 from diffusers import AutoencoderKLLTXVideo
 print("loading VAE from the single file (bundles both DiT and VAE tensors)...", flush=True)
-vae = AutoencoderKLLTXVideo.from_single_file(SINGLE_FILE, torch_dtype=torch.bfloat16).to("cuda")
+from huggingface_hub import hf_hub_download
+ckpt = hf_hub_download(LTX_REPO, LTX_FILE, revision=LTX_REV)
+import hashlib
+h = hashlib.sha256()
+with open(ckpt, "rb") as f:
+    for chunk in iter(lambda: f.read(1 << 22), b""):
+        h.update(chunk)
+print(f"checkpoint {Path(ckpt).name} · {Path(ckpt).stat().st_size/2**30:.2f} GB · "
+      f"sha256 {h.hexdigest()[:16]}...", flush=True)
+vae = AutoencoderKLLTXVideo.from_single_file(ckpt, torch_dtype=torch.bfloat16).to("cuda")
 vae.eval()
 print("VAE loaded", flush=True)
 
