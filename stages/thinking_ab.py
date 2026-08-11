@@ -391,6 +391,22 @@ NEW = """            elif resolved_device == "cuda":
                 else:
                     self.dtype = torch.float16"""
 assert OLD in src, "ACE-Step changed under its pin — impossible unless the checkout failed"
+
+# THE THINKING PATH IS INTERACTIVE. With `thinking` on, cli.py writes a draft prompt to a file
+# and blocks on a bare input() waiting for you to press Enter ("Edit the file now..."), which in
+# a notebook is an instant EOFError and a dead run — twice now, at 175 s each. The library has
+# the escape hatch (`if getattr(llm_handler, "_skip_prompt_edit", False): return prompt`) but
+# exposes no CLI flag for it, so patch the default in. Belt and braces: stdin is also fed.
+cli_p = REPO / "cli.py"
+cli_s = cli_p.read_text()
+OLD_EDIT = '        if getattr(llm_handler, "_skip_prompt_edit", False):'
+NEW_EDIT = ('        if not hasattr(llm_handler, "_skip_prompt_edit"):\n'
+            '            llm_handler._skip_prompt_edit = True   # AQ: non-interactive by default\n'
+            '        if getattr(llm_handler, "_skip_prompt_edit", False):')
+assert OLD_EDIT in cli_s, "cli.py interactive guard moved — re-read it before trusting this patch"
+cli_p.write_text(cli_s.replace(OLD_EDIT, NEW_EDIT, 1))
+print("cli.py patched: prompt-edit wait skipped by default", flush=True)
+
 orch.write_text(src.replace(OLD, NEW, 1))
 
 chosen = None
@@ -466,7 +482,7 @@ for _i, (seed, strength) in enumerate(CANDIDATES):
     # the line's rc is then genuinely the CLI's.
     rc = sh(f"cd {REPO} && AQ_FORCE_DTYPE={chosen['dtype']} "
        f"PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True ACESTEP_GENERATION_TIMEOUT=2400 "
-       f"python cli.py -c {conf} --backend pt --log-level INFO > /tmp/cli_{name}.txt 2>&1", quiet=True)
+       f"yes '' | python cli.py -c {conf} --backend pt --log-level INFO > /tmp/cli_{name}.txt 2>&1", quiet=True)
     found = sorted(Path(TMP / f"out_{name}").rglob("*.flac")) + \
             sorted(Path(TMP / f"out_{name}").rglob("*.wav"))
     row = {"seed": seed, "thinking": think, "seconds": round(time.time()-t0, 1), "steps": 80,
