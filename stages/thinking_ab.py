@@ -447,9 +447,19 @@ for _i, (seed, strength) in enumerate(CANDIDATES):
         "bpm": BPM, "keyscale": KEYSCALE, "timesignature": "4/4", "vocal_language": "en",
         "duration": DURATION, "inference_steps": 80, "guidance_scale": 7.5,
         "seed": seed, "infer_method": "ode",
-        "thinking": think, "use_cot_metas": think, "use_cot_caption": think,
-        "use_cot_lyrics": think, "use_cot_language": think,
-        "batch_size": 1, "use_random_seed": False, "seeds": [seed]}))
+        # `thinking` and the `use_cot_*` flags are NOT the same switch, and conflating them cost a run:
+        #   thinking       -> the 5 Hz LM emits SEMANTIC AUDIO CODES for the DiT (the quality lever)
+        #   use_cot_lyrics -> the LM WRITES THE LYRICS for you, discarding the ones supplied
+        #   use_cot_caption/metas/language -> likewise delegate authorship of those fields
+        # Setting them together made the CLI try to generate a lyric from the caption and then
+        # fail validation ("--use_cot_lyrics requires the LM handler"). Had it succeeded it would
+        # have sung a lyric nobody wrote. The A/B tests the LEVER, with authorship kept.
+        "thinking": think, "use_cot_metas": False, "use_cot_caption": False,
+        "use_cot_lyrics": False, "use_cot_language": False,
+        "batch_size": 1, "use_random_seed": False, "seeds": [seed],
+        # pt backend: the library already forces this on pre-Volta cards
+        # (gpu_config._apply_lm_backend_compatibility_overrides -> pt_only).
+        "lm_backend": "pt", "offload_lm_to_cpu": True}))
     t0 = time.time()
     # No pipes here: PIPESTATUS is bash-only and shell=True is dash on this image — a pipe
     # would silently report tail's exit code as the render's. Redirect whole-output to a file;
