@@ -89,15 +89,31 @@ def load_still(w, h):
     return a
 
 def sparks(img):
-    """Count small bright blobs in the lower third — the coal bed's live embers."""
+    """Count small bright blobs in the lower third — the coal bed's live embers.
+
+    The first version used `band > median9 + 3*global_std` and returned ZERO on the ORIGINAL
+    image, so every keep-ratio was 0/0 and the gate reported that LTX had destroyed a spark field
+    it had never detected in the first place. On this image the global std is 0.149, so the
+    threshold sat at +0.447 over a local median in a band whose own p99 is 0.754 — nothing could
+    clear it.
+
+    A white top-hat is the right operator: it isolates bright features SMALLER than the
+    structuring element, which is the definition of an ember, and it is blind to the large slow
+    glow of the bed itself. Calibrated on the source image (704x480): size=5, k=2.5 -> 343 blobs,
+    which matches what is visibly there.
+    """
     from scipy import ndimage
     g = img[..., 0] * 0.5 + img[..., 1] * 0.35 + img[..., 2] * 0.15
     band = g[int(g.shape[0] * 0.6):]
-    med = ndimage.median_filter(band, size=9)
-    hot = band > (med + 3.0 * band.std())
+    th = ndimage.white_tophat(band, size=5)
+    sd = th.std()
+    if sd < 1e-6:
+        return 0
+    hot = th > 2.5 * sd
     lab, n = ndimage.label(hot)
     sizes = ndimage.sum(hot, lab, range(1, n + 1))
     return int((sizes >= 2).sum())
+
 
 def highpass_energy(img):
     g = img.mean(-1)
@@ -115,7 +131,15 @@ for w, h in [(512, 352), (640, 448), (704, 480), (768, 512), (896, 608)]:
     x = torch.from_numpy(a).permute(2, 0, 1)[None, :, None].to("cuda", torch.bfloat16) * 2 - 1
     with torch.no_grad():
         lat = vae.encode(x).latent_dist.sample()
-        back = vae.decode(lat).sample
+        if getattr(vae.config, 'scaling_factor', None):
+            pass   # LTX carries per-channel stats in the checkpoint; encode/decode
+                   # here are a matched pair, so no extra scaling is applied
+        # LTX's VAE decoder is TIMESTEP-CONDITIONED, unlike every other VAE in diffusers:
+        # decode(z, temb) multiplies temb by a Parameter, so omitting it is a TypeError, not a
+        # default. The pipeline's own value for a clean decode is decode_timestep=0.0 (read from
+        # pipeline_ltx_image2video.py v0.39.0, not guessed).
+        temb = torch.tensor([0.0], device=lat.device, dtype=lat.dtype)
+        back = vae.decode(lat, temb, return_dict=False)[0]
     b = ((back[0, :, 0].float().permute(1, 2, 0).cpu().numpy() + 1) / 2).clip(0, 1)
     s0, s1 = sparks(a), sparks(b)
     e0, e1 = highpass_energy(a), highpass_energy(b)
@@ -124,7 +148,12 @@ for w, h in [(512, 352), (640, 448), (704, 480), (768, 512), (896, 608)]:
            "spark_keep": round(s1 / max(s0, 1), 3),
            "hp_keep": round(e1 / max(e0, 1e-9), 3),
            "latent_shape": list(lat.shape)}
-    row["pass"] = bool(row["spark_keep"] >= 0.70 and row["hp_keep"] >= 0.60)
+    if s0 == 0:
+        row["pass"] = False
+        row["note"] = ("DETECTOR FAILED on the source image — a 0/0 ratio is not evidence about "
+                       "the model. Fix the instrument before reading this row.")
+    else:
+        row["pass"] = bool(row["spark_keep"] >= 0.70 and row["hp_keep"] >= 0.60)
     rows.append(row)
     print(f"  {w}x{h}: sparks {s0}->{s1} ({row['spark_keep']:.0%}) · "
           f"high-pass {row['hp_keep']:.0%} · {'PASS' if row['pass'] else 'fail'}", flush=True)
