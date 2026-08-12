@@ -159,13 +159,30 @@ def push_verified(slug, title, py, public=False, sources=(), tries=6):
             a = api()
             d = _tf.mkdtemp()
             call(a.kernels_pull, f"{owner()}/{slug}", d, metadata=True, quiet=True)
+            call(a.kernels_pull, f"{owner()}/{slug}", d, quiet=True)
             m = _j.load(open(f"{d}/kernel-metadata.json"))
             got = m.get("kernel_sources") or []
-            print(f"  kernel_sources={got} is_private={m.get('is_private')}", flush=True)
-            if set(got) >= set(sources):
-                print(f"  VERIFIED: {slug} has every requested mount", flush=True)
+            # VERIFY THE CONTENT, NOT THE METADATA. Metadata survives from previous versions, so
+            # a push that failed (SSL drop, quota, slot) still reads back with the right mounts
+            # and reports success — which happened twice, and the second time sent a stale run's
+            # verdict as if it were fresh. Pull the notebook source back and compare it to what
+            # we meant to push; only identical code proves the push landed.
+            import re as _re
+            src_local = (HERE / py).resolve().read_text()
+            nbp = next(Path(d).glob("*.ipynb"), None)
+            pushed = ""
+            if nbp:
+                cells = _j.loads(nbp.read_text()).get("cells", [])
+                pushed = "".join("".join(c["source"]) if isinstance(c["source"], list)
+                                 else c["source"] for c in cells)
+            norm = lambda t: _re.sub(r"\s+", " ", t).strip()
+            content_ok = norm(pushed) == norm(src_local)
+            print(f"  kernel_sources={got} content_matches={content_ok}", flush=True)
+            if content_ok and set(got) >= set(sources):
+                print(f"  VERIFIED: {slug} — pushed source matches and mounts are present",
+                      flush=True)
                 return True
-            print("  mounts MISSING — retrying", flush=True)
+            print("  push did NOT land (stale source or missing mounts) — retrying", flush=True)
         except Exception as e:
             print(f"  readback failed: {str(e)[:70]}", flush=True)
         _t.sleep(45)
