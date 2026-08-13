@@ -175,7 +175,11 @@ def push_verified(slug, title, py, public=False, sources=(), tries=6):
                 cells = _j.loads(nbp.read_text()).get("cells", [])
                 pushed = "".join("".join(c["source"]) if isinstance(c["source"], list)
                                  else c["source"] for c in cells)
-            norm = lambda t: _re.sub(r"\s+", " ", t).strip()
+            # Compare with ALL whitespace removed: to_ipynb rstrips each cell, so rejoining
+            # them drops the newline at every cell boundary. Collapsing runs to a single space
+            # still sees that as a difference and rejected pushes that had genuinely landed.
+            # Stripping whitespace entirely still catches any real code change.
+            norm = lambda t: _re.sub(r"\s+", "", t)
             content_ok = norm(pushed) == norm(src_local)
             print(f"  kernel_sources={got} content_matches={content_ok}", flush=True)
             if content_ok and set(got) >= set(sources):
