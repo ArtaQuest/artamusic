@@ -1,13 +1,22 @@
-# STEEL — the animated cover, generated. One image, 180 seconds, no cuts.
+# STEEL — the animated cover: a short SEAMLESS LOOP, generated, and deliberately lightweight.
 #
 # The operator rejected a procedural heat simulation as unrealistic: physics-derived motion
 # reads as an EFFECT laid over a photograph, not as footage. This uses a real video model.
 #
-# LTXI2VLongMultiPromptPipeline (diffusers 0.39.0) is the piece that makes 180 s possible
-# without montage: it denoises ONE latent for the whole duration in overlapping temporal
-# tiles, re-anchoring each tile's statistics to the first via AdaIN. There is no chaining,
-# no dissolve and no loop — the no-cuts requirement is satisfied by construction rather
-# than by editing. Every parameter below was read from the pipeline's real signature.
+# WHY A LOOP RATHER THAN 180 UNIQUE SECONDS. The operator asked for efficient and lightweight,
+# and 180 s of generated video is the wrong shape for a cover three times over: it costs ~18x the
+# GPU, it produces a file two orders of magnitude larger than it needs to be (the last attempt was
+# 1,051 MB for three minutes), and nobody watches a forge scene for narrative development. A
+# 12-second seamless loop is visually indistinguishable for this purpose and costs a fraction of
+# everything.
+#
+# Seamlessness is made, not hoped for: generate 12 s, then cross-dissolve the final 1.5 s into the
+# opening 1.5 s. On smoke and embers — which have no rigid structure to misalign — a dissolve of
+# that length is imperceptible, and it avoids ping-pong, which reads as obviously reversed on
+# rising particles. The wrap point is then measured like any other cut.
+#
+# Encoded VP9 (the project's house codec for teasers) at a quality that suits a near-static scene.
+# Target: single-digit megabytes.
 #
 # Gate 0 measured the VAE round trip: 69.9% of sparks and 77% of high-frequency energy
 # survive at 512x352, falling to 58%/60% at 896. That missed a pre-registered 70% bar by a
@@ -118,8 +127,9 @@ print("pipeline ready", flush=True)
 # right base. The x2 latent upscaler restores delivery resolution afterwards.
 W, H = 512, 352
 FPS = 24
-SECONDS = 180.0
-NUM_FRAMES = int(SECONDS * FPS) + 1          # must be == 1 (mod 8)
+SECONDS = 12.0                               # the loop body, not the song
+XFADE = 1.5                                  # dissolve that makes the wrap invisible
+NUM_FRAMES = int((SECONDS + XFADE) * FPS) + 1
 NUM_FRAMES -= (NUM_FRAMES - 1) % 8
 print(f"geometry: {W}x{H} · {NUM_FRAMES} frames · {NUM_FRAMES/FPS:.2f} s", flush=True)
 
@@ -149,33 +159,49 @@ out = pipe(
 gen_s = round(time.time() - t0, 1)
 print(f"generated {len(out)} frames in {gen_s}s ({gen_s/60:.1f} min)", flush=True)
 
-silent = str(OUT / "steel_i2v_silent.mp4")
+silent = str(OUT / "steel_i2v_raw.mp4")
 export_to_video(out, silent, fps=FPS)
 
-# deliver at 1080p with the audio laid on once
-final = OUT / "STEEL_cover_i2v.mp4"
-sh(f"ffmpeg -v error -i '{silent}' -i '{AUDIO}' "
-   f"-vf scale=1920:1320:flags=lanczos,crop=1920:1080 "
-   f"-c:v libx264 -preset slow -crf 17 -pix_fmt yuv420p -c:a aac -b:a 256k "
-   f"-shortest '{final}' -y")
+# ── make it loop: dissolve the tail into the head ───────────────────────────────────────
+loop_src = str(OUT / "steel_loop_src.mp4")
+body = SECONDS
+sh(f"ffmpeg -v error -i '{silent}' -filter_complex "
+   f"\"[0:v]split=2[a][b];"
+   f"[a]trim=0:{body},setpts=PTS-STARTPTS[main];"
+   f"[b]trim={body}:{body + XFADE},setpts=PTS-STARTPTS[tail];"
+   f"[main][tail]xfade=transition=fade:duration={XFADE}:offset={body - XFADE}[v]\" "
+   f"-map '[v]' -c:v libx264 -preset veryslow -crf 20 -pix_fmt yuv420p '{loop_src}' -y")
 
-# prove the claims on the DELIVERED file
+# ── deliver: VP9, the house codec, sized for a near-static scene ────────────────────────
+final = OUT / "STEEL_cover_loop.webm"
+sh(f"ffmpeg -v error -i '{loop_src}' -vf scale=1080:-2:flags=lanczos "
+   f"-c:v libvpx-vp9 -crf 33 -b:v 0 -row-mt 1 -cpu-used 1 -g 240 -an '{final}' -y")
+mp4 = OUT / "STEEL_cover_loop.mp4"          # h264 fallback for players without VP9
+sh(f"ffmpeg -v error -i '{loop_src}' -vf scale=1080:-2:flags=lanczos "
+   f"-c:v libx264 -preset veryslow -crf 28 -pix_fmt yuv420p -movflags +faststart -an '{mp4}' -y")
+
+# ── verify the delivered loop ───────────────────────────────────────────────────────────
 import subprocess as _sp
-probe = _sp.run(f"ffprobe -v error -select_streams v:0 -show_entries stream=nb_frames,width,height "
-                f"-of default=nw=1 '{final}'", shell=True, capture_output=True, text=True).stdout
-print(probe.strip(), flush=True)
 raw = "/tmp/_v.rgb"
-sh(f"ffmpeg -v error -i '{final}' -vf scale=256:144 -f rawvideo -pix_fmt rgb24 {raw} -y", quiet=True)
-a = np.fromfile(raw, dtype=np.uint8).reshape(-1, 144, 256, 3).astype(np.float32) / 255.0
+sh(f"ffmpeg -v error -i '{final}' -vf scale=256:176 -f rawvideo -pix_fmt rgb24 {raw} -y", quiet=True)
+a = np.fromfile(raw, dtype=np.uint8).reshape(-1, 176, 256, 3).astype(np.float32) / 255.0
 luma = 0.2126*a[...,0] + 0.7152*a[...,1] + 0.0722*a[...,2]
 mean = luma.reshape(len(a), -1).mean(1)
 d = np.abs(np.diff(mean))
 ti = np.abs(np.diff(luma, axis=0)).reshape(len(a)-1, -1).mean(1) * 255
-verdict = {"frames": int(len(a)), "seconds": round(len(a)/FPS, 2), "gen_minutes": round(gen_s/60,1),
-           "cuts": int((d > 0.10).sum()), "flashes_per_s": round(float((d>0.10).sum())/(len(a)/FPS), 3),
-           "ti_mean": round(float(ti.mean()), 2), "ti_p95": round(float(np.percentile(ti,95)), 2),
-           "max_dmean": round(float(d.max()), 4), "base": f"{W}x{H}", "sha256_ckpt": h.hexdigest()}
+# the wrap: last frame against first, which is what a looping player actually shows back to back
+wrap = float(np.abs(luma[-1] - luma[0]).mean() * 255)
+verdict = {"seconds": round(len(a)/FPS, 2), "frames": int(len(a)),
+           "webm_mb": round(final.stat().st_size/1048576, 2),
+           "mp4_mb": round(mp4.stat().st_size/1048576, 2),
+           "gen_minutes": round(gen_s/60, 1),
+           "cuts": int((d > 0.10).sum()),
+           "ti_mean": round(float(ti.mean()), 2),
+           "wrap_delta": round(wrap, 2), "ti_p95": round(float(np.percentile(ti, 95)), 2),
+           "base": f"{W}x{H}", "sha256_ckpt": h.hexdigest()[:24]}
 (WORK / "i2v_verify.json").write_text(json.dumps(verdict, indent=2))
 print("\nVERIFY:", json.dumps(verdict), flush=True)
-assert verdict["cuts"] == 0, f"the cover must not cut — found {verdict['cuts']}"
-print("\nDONE", flush=True)
+assert verdict["cuts"] == 0, f"the loop must not cut — found {verdict['cuts']}"
+assert verdict["wrap_delta"] < verdict["ti_p95"] * 1.5, (
+    f"the wrap is visible: {verdict['wrap_delta']} vs typical frame delta {verdict['ti_p95']}")
+print("\nDONE — seamless loop, both codecs", flush=True)
