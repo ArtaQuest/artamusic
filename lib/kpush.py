@@ -143,6 +143,13 @@ def push_verified(slug, title, py, public=True, sources=(), tries=6):
     the only way to push, so the failure mode cannot recur.
     """
     import json as _j, subprocess as _sp, sys as _sys, tempfile as _tf, time as _t
+    # Unskippable static check. Two kernels died on a NameError at module scope after the model
+    # had already loaded — 40 ms of AST work would have caught both. A cheap check only helps if
+    # it cannot be forgotten, so it lives here rather than in a habit.
+    from precheck import unbound
+    _bad = unbound(str((HERE / py).resolve()))
+    if _bad:
+        raise RuntimeError(f"{py}: unbound names at module scope {_bad} — refusing to push")
     args = [_sys.executable, str(HERE / "kpush.py"), "push", slug, "--title", title, "--py", py]
     if public:
         args.append("--public")

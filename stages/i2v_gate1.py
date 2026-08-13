@@ -25,13 +25,14 @@
 #
 # PASS = the smallest bucket retaining >=70% of sparks and >=60% of high-pass energy.
 # If nothing clears it at or below 896 wide, this reports that and we do NOT spend a session.
-import hashlib, json, os, subprocess, sys
+import hashlib, json, os, subprocess, sys, time
 from pathlib import Path
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["HF_HOME"] = "/kaggle/temp/hf"
 TMP = Path("/tmp/aq"); TMP.mkdir(parents=True, exist_ok=True)
 WORK = Path("/kaggle/working")
+OUT = WORK / "out"; OUT.mkdir(parents=True, exist_ok=True)
 
 # Download explicitly at the pinned revision, then hand from_single_file a LOCAL PATH.
 # Passing a full https:// URL made diffusers treat it as repo-relative and request
