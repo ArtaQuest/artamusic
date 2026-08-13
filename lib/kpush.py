@@ -127,8 +127,14 @@ def to_ipynb(py, out):
                      "language": "python"}, "language_info": {"name": "python"}}}, indent=1))
     return out
 
-def push_verified(slug, title, py, public=False, sources=(), tries=6):
-    """Push, then READ BACK the pushed metadata and confirm the mounts actually took.
+def push_verified(slug, title, py, public=True, sources=(), tries=6):
+    """Push, then READ BACK the pushed source and confirm it matches what we meant to send.
+
+    PUBLIC BY DEFAULT. ArtaSwitch rotates the compute account between runs, and a PRIVATE kernel
+    becomes unreadable the instant it does — a finished run's error log was lost that way, with
+    ten retries all answering 'Permission kernels.get was denied' because the credential had
+    moved. Public costs nothing here: the code already lives in a public repo, and a stranger
+    being able to re-run it is the platform's entire thesis.
 
     Three kernels in a row died at their own mount assert because a push was assumed to have
     landed: once the --kernel-source flag was omitted, once the push output was swallowed by an
