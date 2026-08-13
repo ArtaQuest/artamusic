@@ -116,7 +116,7 @@ for (tag, prompt) in PROMPTS:
                                        "text, static image, frozen",
                        width=w, height=h, num_frames=73, frame_rate=24,
                        num_inference_steps=8, guidance_scale=1.0,
-                       generator=torch.Generator("cpu").manual_seed(4242)).frames[0]
+                       generator=torch.Generator(device="cuda").manual_seed(4242)).frames[0]
             p_out = OUT / f"{name}.mp4"
             export_to_video(vid, str(p_out), fps=24)
             secs = round(time.time() - t0, 1)

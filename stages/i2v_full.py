@@ -154,7 +154,7 @@ out = pipe(
     decode_horizontal_tiles=4, decode_vertical_tiles=4, decode_overlap=3,
     max_sequence_length=512,                 # 128 default would truncate the grade clause
     output_type="pil", seed=4242,
-    generator=torch.Generator("cpu").manual_seed(4242),
+    generator=torch.Generator(device="cuda").manual_seed(4242),
 ).frames[0]
 gen_s = round(time.time() - t0, 1)
 print(f"generated {len(out)} frames in {gen_s}s ({gen_s/60:.1f} min)", flush=True)
