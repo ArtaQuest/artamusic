@@ -100,7 +100,7 @@ print("still:", STILL, "\naudio:", AUDIO, flush=True)
 
 from huggingface_hub import hf_hub_download
 import numpy as np
-from diffusers import (LTXI2VLongMultiPromptPipeline, LTXVideoTransformer3DModel,
+from diffusers import (LTXImageToVideoPipeline, LTXVideoTransformer3DModel,
                        AutoencoderKLLTXVideo)
 from diffusers.utils import export_to_video
 from PIL import Image
@@ -116,7 +116,12 @@ print(f"checkpoint sha256 {h.hexdigest()[:24]} · {Path(ckpt).stat().st_size/2**
 
 tr = LTXVideoTransformer3DModel.from_single_file(ckpt, torch_dtype=torch.bfloat16)
 vae = AutoencoderKLLTXVideo.from_single_file(ckpt, torch_dtype=torch.bfloat16)
-pipe = LTXI2VLongMultiPromptPipeline.from_pretrained(
+# The LONG pipeline needs a scheduler `mu` that the simple one derives internally
+# ('ValueError: mu must be passed when use_dynamic_shifting is True'). Its temporal
+# tiling exists for minute-scale output; a 6 s loop does not need it, and the SIMPLE
+# pipeline is the one already proven on this card — four clips, 73 frames each, zero
+# cuts. Use the thing that works rather than debug the thing that does not.
+pipe = LTXImageToVideoPipeline.from_pretrained(
     "Lightricks/LTX-Video", transformer=tr, vae=vae, torch_dtype=torch.bfloat16)
 pipe.enable_model_cpu_offload()      # NOT sequential: whole submodules move once per phase,
 pipe.vae.enable_tiling()             # so weights are not re-streamed over PCIe every step
@@ -136,7 +141,7 @@ SECONDS = 6.0
 XFADE = 2.0
 # cond_strength is raised from the pipeline default for the same reason: hold the generation
 # closer to the photograph the operator approved, rather than letting it invent its own forge.
-COND_STRENGTH = 0.75
+COND_STRENGTH = 0.75   # (simple pipeline conditions on the image directly)
 NUM_FRAMES = int((SECONDS + XFADE) * FPS) + 1
 NUM_FRAMES -= (NUM_FRAMES - 1) % 8
 print(f"geometry: {W}x{H} · {NUM_FRAMES} frames · {NUM_FRAMES/FPS:.2f} s", flush=True)
@@ -153,17 +158,10 @@ NEG = ("worst quality, blurry, jittery, distorted, watermark, text, cartoon, cgi
 img = Image.open(STILL).convert("RGB").resize((W, H), Image.LANCZOS)
 t0 = time.time()
 out = pipe(
-    prompt=PROMPT, negative_prompt=NEG,
-    cond_image=img, cond_strength=COND_STRENGTH,
+    image=img, prompt=PROMPT, negative_prompt=NEG,
     height=H, width=W, num_frames=NUM_FRAMES, frame_rate=FPS,
     num_inference_steps=8, guidance_scale=1.0,
-    temporal_tile_size=80, temporal_overlap=24,
-    temporal_overlap_cond_strength=0.5,
-    adain_factor=0.25,                       # the built-in anti-drift lever
     decode_timestep=0.05, decode_noise_scale=0.025,
-    decode_horizontal_tiles=4, decode_vertical_tiles=4, decode_overlap=3,
-    max_sequence_length=512,                 # 128 default would truncate the grade clause
-    output_type="pil", seed=4242,
     generator=torch.Generator(device="cuda").manual_seed(4242),
 ).frames[0]
 gen_s = round(time.time() - t0, 1)
