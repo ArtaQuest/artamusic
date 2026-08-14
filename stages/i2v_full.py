@@ -127,16 +127,26 @@ print("pipeline ready", flush=True)
 # right base. The x2 latent upscaler restores delivery resolution afterwards.
 W, H = 512, 352
 FPS = 24
-SECONDS = 12.0                               # the loop body, not the song
-XFADE = 1.5                                  # dissolve that makes the wrap invisible
+# Gate 1 also measured DRIFT: the scene wanders ~25 luma units from its conditioning image in
+# only 3 s, and keeps going. A 12 s body would end somewhere visibly different from where it
+# began, which no dissolve can hide. So the loop body is short and the dissolve is proportionally
+# long: 6 s of body with a 2 s wrap, where the accumulated drift is small enough for the fade to
+# absorb. A 6 s loop under a 3-minute song is invisible as repetition and costs a fifth of the GPU.
+SECONDS = 6.0
+XFADE = 2.0
+# cond_strength is raised from the pipeline default for the same reason: hold the generation
+# closer to the photograph the operator approved, rather than letting it invent its own forge.
+COND_STRENGTH = 0.75
 NUM_FRAMES = int((SECONDS + XFADE) * FPS) + 1
 NUM_FRAMES -= (NUM_FRAMES - 1) % 8
 print(f"geometry: {W}x{H} · {NUM_FRAMES} frames · {NUM_FRAMES/FPS:.2f} s", flush=True)
 
-PROMPT = ("A forged steel sword rests on a bed of glowing orange coals in a dark forge. The coals "
-          "pulse and breathe with heat, embers drift slowly upward through the air, thin smoke "
-          "curls above the blade, orange light flickers across the steel. The camera is completely "
-          "still. Photorealistic, cinematic, shallow depth of field, volumetric light.")
+# Gate 1 measured both candidate prompts on this exact still: "heat" produced roughly twice the
+# motion of "embers" (TI 3.64-4.22 vs 1.85-1.90) at the same cut count of zero. Motion is the
+# scarce quantity in a near-static scene, so the heat framing wins on evidence.
+PROMPT = ("Heat shimmers over glowing coals beneath a steel blade in a dark smithy. Slow rising "
+          "heat haze distorts the air, orange light flickers across the metal, embers drift "
+          "upward, smoke drifts. Locked-off camera, photorealistic, cinematic.")
 NEG = ("worst quality, blurry, jittery, distorted, watermark, text, cartoon, cgi, "
        "camera movement, zoom, pan, cuts, scene change, morphing, melting")
 
@@ -144,7 +154,7 @@ img = Image.open(STILL).convert("RGB").resize((W, H), Image.LANCZOS)
 t0 = time.time()
 out = pipe(
     prompt=PROMPT, negative_prompt=NEG,
-    cond_image=img, cond_strength=0.5,
+    cond_image=img, cond_strength=COND_STRENGTH,
     height=H, width=W, num_frames=NUM_FRAMES, frame_rate=FPS,
     num_inference_steps=8, guidance_scale=1.0,
     temporal_tile_size=80, temporal_overlap=24,
