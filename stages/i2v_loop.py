@@ -110,8 +110,12 @@ print("still:", STILL, flush=True)
 
 from huggingface_hub import hf_hub_download
 import numpy as np
-from diffusers import (LTXConditionPipeline, LTXVideoCondition, LTXVideoTransformer3DModel,
+from diffusers import (LTXConditionPipeline, LTXVideoTransformer3DModel,
                        AutoencoderKLLTXVideo)
+# LTXVideoCondition is defined in the pipeline module but NOT re-exported from diffusers'
+# __init__ at any level (checked: top-level, pipelines, and pipelines.ltx all omit it), so it
+# has to come from the module path.
+from diffusers.pipelines.ltx.pipeline_ltx_condition import LTXVideoCondition
 from diffusers.utils import export_to_video
 from PIL import Image
 
