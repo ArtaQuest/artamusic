@@ -127,7 +127,8 @@ def to_ipynb(py, out):
                      "language": "python"}, "language_info": {"name": "python"}}}, indent=1))
     return out
 
-def push_verified(slug, title, py, public=True, sources=(), tries=6, allow_violations=False):
+def push_verified(slug, title, py, public=True, sources=(), tries=6, allow_violations=False,
+                  internet=False, gpu=True):
     """Push, then READ BACK the pushed source and confirm it matches what we meant to send.
 
     PUBLIC BY DEFAULT. ArtaSwitch rotates the compute account between runs, and a PRIVATE kernel
@@ -161,6 +162,10 @@ def push_verified(slug, title, py, public=True, sources=(), tries=6, allow_viola
     args = [_sys.executable, str(HERE / "kpush.py"), "push", slug, "--title", title, "--py", py]
     if public:
         args.append("--public")
+    if internet:
+        args.append("--internet")
+    if not gpu:
+        args.append("--cpu")
     for s_ in sources:
         args += ["--kernel-source", s_]
     for attempt in range(tries):
@@ -225,6 +230,8 @@ if __name__ == "__main__":
     p.add_argument("--title"); p.add_argument("--py"); p.add_argument("--public", action="store_true")
     p.add_argument("--kernel-source", action="append", default=[],
                    help="mount another kernel's OUTPUT under /kaggle/input (must be public)")
+    p.add_argument("--internet", action="store_true", help="wheelhouse builder ONLY")
+    p.add_argument("--cpu", action="store_true", help="enable_gpu=false — zero quota")
     a = p.parse_args()
     if a.cmd == "push":
         f = HERE / f".push-{a.slug}"; f.mkdir(exist_ok=True)
@@ -232,7 +239,7 @@ if __name__ == "__main__":
         (f / "kernel-metadata.json").write_text(json.dumps({
             "id": f"{owner()}/{a.slug}", "title": a.title or a.slug, "code_file": Path(nb).name,
             "language": "python", "kernel_type": "notebook", "is_private": not a.public,
-            "enable_gpu": True, "enable_internet": True, "dataset_sources": [],
+            "enable_gpu": not a.cpu, "enable_internet": bool(a.internet), "dataset_sources": [],
             "competition_sources": [], "kernel_sources": a.kernel_source,
             "model_sources": []}, indent=2))
         r = call(api().kernels_push, str(f), timeout=None, acc=None)

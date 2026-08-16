@@ -25,6 +25,10 @@ ap = argparse.ArgumentParser()
 ap.add_argument("slug"); ap.add_argument("title"); ap.add_argument("py")
 ap.add_argument("--source", action="append", default=[])
 ap.add_argument("--tries", type=int, default=30)
+ap.add_argument("--allow-violations", action="store_true",
+                help="ONLY for the wheelhouse builder, the one kernel that needs internet+pip")
+ap.add_argument("--internet", action="store_true", help="wheelhouse builder only")
+ap.add_argument("--cpu", action="store_true", help="no GPU: zero quota")
 a = ap.parse_args()
 
 api = KaggleApi(); api.authenticate()
@@ -32,7 +36,8 @@ WHO = api.config_values.get("username")
 print(f"locked to account: {WHO} (this process keeps it regardless of rotation)", flush=True)
 REF = f"{WHO}/{a.slug}"
 
-kpush.push_verified(a.slug, a.title, a.py, public=True, sources=a.source, tries=a.tries)
+kpush.push_verified(a.slug, a.title, a.py, public=True, sources=a.source, tries=a.tries,
+                    allow_violations=a.allow_violations, internet=a.internet, gpu=not a.cpu)
 
 seen = None
 while True:
