@@ -67,13 +67,19 @@ NEG = ("cartoon, illustration, painting, cgi render, plastic, blurry, low detail
 
 from diffusers import ZImagePipeline
 img_pipe = ZImagePipeline.from_pretrained("Tongyi-MAI/Z-Image-Turbo", torch_dtype=torch.bfloat16)
-img_pipe.enable_model_cpu_offload()
-print("Z-Image-Turbo ready", flush=True)
+# First attempt OOM'd: 14.07 GB resident, needed 1.88 more — the 6.15B DiT and its Qwen3-4B text
+# encoder were both on the card under model-level offload. SEQUENTIAL offload streams one
+# submodule at a time (peak ~ largest layer + activations), at the cost of PCIe re-streaming per
+# step. For 9 steps that cost is small; for a 16 GB card it is the difference between running
+# and not. This is exactly the take-turns partitioning the operator asked about at the outset.
+img_pipe.enable_sequential_cpu_offload()
+img_pipe.vae.enable_tiling() if hasattr(img_pipe, "vae") else None
+print("Z-Image-Turbo ready (sequential offload)", flush=True)
 
 t0 = time.time()
 cands = []
 for i, seed in enumerate([SEED, 5150, 6270, 7380]):
-    im = img_pipe(prompt=PROMPT, negative_prompt=NEG, width=1024, height=1024,
+    im = img_pipe(prompt=PROMPT, negative_prompt=NEG, width=896, height=896,
                   num_inference_steps=9, guidance_scale=0.0,
                   generator=torch.Generator(device="cuda").manual_seed(seed)).images[0]
     p = OUT / f"still_{seed}.png"
