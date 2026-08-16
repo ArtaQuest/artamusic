@@ -127,7 +127,7 @@ def to_ipynb(py, out):
                      "language": "python"}, "language_info": {"name": "python"}}}, indent=1))
     return out
 
-def push_verified(slug, title, py, public=True, sources=(), tries=6):
+def push_verified(slug, title, py, public=True, sources=(), tries=6, allow_violations=False):
     """Push, then READ BACK the pushed source and confirm it matches what we meant to send.
 
     PUBLIC BY DEFAULT. ArtaSwitch rotates the compute account between runs, and a PRIVATE kernel
@@ -150,6 +150,14 @@ def push_verified(slug, title, py, public=True, sources=(), tries=6):
     _bad = unbound(str((HERE / py).resolve()))
     if _bad:
         raise RuntimeError(f"{py}: unbound names at module scope {_bad} — refusing to push")
+    # Tier-0 contracts: every v1 death class, checked in under a second on the bytes we push.
+    # A kernel that would die for a non-GPU reason never leaves the laptop.
+    from contract import check as _contract
+    if not allow_violations:
+        _v = _contract(str((HERE / py).resolve()))
+        if _v:
+            raise RuntimeError(f"{py}: {len(_v)} contract violation(s) — refusing to push:\n  " +
+                               "\n  ".join(_v))
     args = [_sys.executable, str(HERE / "kpush.py"), "push", slug, "--title", title, "--py", py]
     if public:
         args.append("--public")
@@ -192,8 +200,13 @@ def push_verified(slug, title, py, public=True, sources=(), tries=6):
             # them drops the newline at every cell boundary. Collapsing runs to a single space
             # still sees that as a difference and rejected pushes that had genuinely landed.
             # Stripping whitespace entirely still catches any real code change.
-            norm = lambda t: _re.sub(r"\s+", "", t)
-            content_ok = norm(pushed) == norm(src_local)
+            # Compare ASTs, not text: whitespace-stripping was a false-negative source (cell
+            # rstrip) and text can differ while code is identical. ast.dump is canonical.
+            import ast as _ast
+            try:
+                content_ok = _ast.dump(_ast.parse(pushed)) == _ast.dump(_ast.parse(src_local))
+            except SyntaxError:
+                content_ok = False
             print(f"  kernel_sources={got} content_matches={content_ok}", flush=True)
             if content_ok and set(got) >= set(sources):
                 print(f"  VERIFIED: {slug} — pushed source matches and mounts are present",
