@@ -1,36 +1,35 @@
-# The single environment every kernel installs from — offline, from a mounted wheelhouse dataset,
-# BEFORE torch is imported. Built once by a CPU kernel ON KAGGLE'S OWN IMAGE so python/glibc/
-# platform tags match; then no kernel ever touches pip's index or the network again.
-#
-# torch is pinned to the cu126 line: Kaggle's preinstalled 2.10+cu128 has no sm_60 kernels.
+# Only what the hardware and the code genuinely require. Everything else is resolved by pip
+# on Kaggle's own image and then FROZEN by the wheelhouse build into requirements.frozen.txt,
+# which is what production kernels install from. A hand-written lock of 30 interlocking pins
+# produced ResolutionImpossible; a lock should be the OUTPUT of a resolve, not a wish list.
 --extra-index-url https://download.pytorch.org/whl/cu126
 torch==2.7.1+cu126
 torchvision==0.22.1+cu126
 torchaudio==2.7.1+cu126
 diffusers==0.39.0
-transformers==4.57.1
-accelerate==1.10.1
-safetensors==0.6.2
-sentencepiece==0.2.0
-protobuf==5.29.5
-ftfy==6.3.1
-imageio==2.37.0
-imageio-ffmpeg==0.6.0
-pillow==11.3.0
-numpy==2.2.6
-scipy==1.15.3
-demucs==4.1.0
-faster-whisper==1.2.1
-pyloudnorm==0.1.1
-mutagen==1.47.0
-toml==0.10.2
-loguru==0.7.3
-einops==0.8.1
-numba==0.61.2
-soundfile==0.13.1
-ffmpeg-python==0.2.0
-python-dotenv==1.1.1
-diskcache==5.6.3
-py3langid==0.3.0
-vector-quantize-pytorch==1.22.15
-hf_transfer==0.1.9
+transformers
+accelerate
+safetensors
+sentencepiece
+protobuf
+ftfy
+imageio
+imageio-ffmpeg
+pillow
+numpy
+scipy
+demucs
+faster-whisper
+pyloudnorm
+mutagen
+toml
+loguru
+einops
+numba
+soundfile
+ffmpeg-python
+python-dotenv
+diskcache
+py3langid
+vector-quantize-pytorch
+hf_transfer

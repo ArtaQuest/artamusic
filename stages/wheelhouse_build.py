@@ -9,42 +9,41 @@
 # Re-run WEEKLY as a canary: Kaggle's image is not pinnable through metadata, so drift is caught
 # here in a 10-minute CPU kernel, not in a 3-hour GPU run.
 import hashlib, json, platform, subprocess, sys
-LOCK_TEXT = '''# The single environment every kernel installs from — offline, from a mounted wheelhouse dataset,
-# BEFORE torch is imported. Built once by a CPU kernel ON KAGGLE'S OWN IMAGE so python/glibc/
-# platform tags match; then no kernel ever touches pip's index or the network again.
-#
-# torch is pinned to the cu126 line: Kaggle's preinstalled 2.10+cu128 has no sm_60 kernels.
+LOCK_TEXT = '''# Only what the hardware and the code genuinely require. Everything else is resolved by pip
+# on Kaggle's own image and then FROZEN by the wheelhouse build into requirements.frozen.txt,
+# which is what production kernels install from. A hand-written lock of 30 interlocking pins
+# produced ResolutionImpossible; a lock should be the OUTPUT of a resolve, not a wish list.
 --extra-index-url https://download.pytorch.org/whl/cu126
 torch==2.7.1+cu126
 torchvision==0.22.1+cu126
 torchaudio==2.7.1+cu126
 diffusers==0.39.0
-transformers==4.57.1
-accelerate==1.10.1
-safetensors==0.6.2
-sentencepiece==0.2.0
-protobuf==5.29.5
-ftfy==6.3.1
-imageio==2.37.0
-imageio-ffmpeg==0.6.0
-pillow==11.3.0
-numpy==2.2.6
-scipy==1.15.3
-demucs==4.1.0
-faster-whisper==1.2.1
-pyloudnorm==0.1.1
-mutagen==1.47.0
-toml==0.10.2
-loguru==0.7.3
-einops==0.8.1
-numba==0.61.2
-soundfile==0.13.1
-ffmpeg-python==0.2.0
-python-dotenv==1.1.1
-diskcache==5.6.3
-py3langid==0.3.0
-vector-quantize-pytorch==1.22.15
-hf_transfer==0.1.9
+transformers
+accelerate
+safetensors
+sentencepiece
+protobuf
+ftfy
+imageio
+imageio-ffmpeg
+pillow
+numpy
+scipy
+demucs
+faster-whisper
+pyloudnorm
+mutagen
+toml
+loguru
+einops
+numba
+soundfile
+ffmpeg-python
+python-dotenv
+diskcache
+py3langid
+vector-quantize-pytorch
+hf_transfer
 '''
 from pathlib import Path
 
@@ -62,7 +61,8 @@ lock.write_text(LOCK_TEXT)
 print("lock:", lock, flush=True)
 
 rc = sh(f"pip download -r '{lock}' -d '{WH}' --only-binary=:all: "
-        f"--extra-index-url https://download.pytorch.org/whl/cu126 2>&1 | tail -25")
+        f"--extra-index-url https://download.pytorch.org/whl/cu126 > /tmp/dl.log 2>&1")
+print(Path("/tmp/dl.log").read_text()[-2500:], flush=True)
 wheels = sorted(WH.glob("*.whl"))
 print(f"{len(wheels)} wheels, {sum(w.stat().st_size for w in wheels)/2**30:.2f} GB", flush=True)
 # A verifier that passes on an empty directory is not a verifier. The lock has ~30
@@ -89,7 +89,12 @@ print(json.dumps(image, indent=1), flush=True)
 # prove the wheelhouse is complete: install from it OFFLINE into a scratch prefix
 # Prove the set is COMPLETE by resolving dependencies too — --no-deps proved nothing.
 rc2 = sh(f"pip install --no-index --find-links='{WH}' -r '{lock}' --target /tmp/_proof "
-         f"2>&1 | tail -8")
+         f"> /tmp/inst.log 2>&1")
+print(Path("/tmp/inst.log").read_text()[-1500:], flush=True)
 print("OFFLINE INSTALL:", "OK" if rc2 == 0 else f"FAILED rc={rc2}", flush=True)
 assert rc2 == 0, "the wheelhouse is incomplete — a production kernel would die at pip time"
+frozen = subprocess.run("pip list --path /tmp/_proof --format=freeze", shell=True,
+                        capture_output=True, text=True).stdout
+(WORK / "requirements.frozen.txt").write_text(frozen)
+print(f"froze {len(frozen.splitlines())} resolved pins -> requirements.frozen.txt", flush=True)
 print("WHEELHOUSE COMPLETE", flush=True)
