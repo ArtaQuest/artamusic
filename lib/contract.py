@@ -116,6 +116,19 @@ def check(kernel_path, metadata=None):
                 break
     for p in env_order(tree, src):
         v.append(f"ORDER: {p}")
+    # An embedded copy of a tracked file is a second source of truth, and two sources of truth
+    # drift: the lock was fixed and the copy inside the kernel was not, so the run rebuilt the
+    # wrong pins. If a kernel embeds LOCK_TEXT it must match requirements.lock byte for byte.
+    mk = "LOCK_TEXT = " + chr(39) * 3
+    if mk in src:
+        a0 = src.index(mk) + len(mk)
+        a1 = src.index(chr(39) * 3, a0)
+        real = HERE.parent / "requirements.lock"
+        if not real.exists():
+            v.append("LOCK: kernel embeds LOCK_TEXT but requirements.lock is missing")
+        elif src[a0:a1] != real.read_text():
+            v.append("LOCK: embedded LOCK_TEXT has drifted from requirements.lock — re-embed it")
+
     if metadata:
         m = json.loads(Path(metadata).read_text()) if not isinstance(metadata, dict) else metadata
         if m.get("is_private", True):

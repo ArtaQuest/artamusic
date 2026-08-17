@@ -30,7 +30,7 @@ imageio-ffmpeg==0.6.0
 pillow==11.3.0
 numpy==2.2.6
 scipy==1.15.3
-demucs==4.0.1
+demucs==4.1.0
 faster-whisper==1.2.1
 pyloudnorm==0.1.1
 mutagen==1.47.0
@@ -61,9 +61,14 @@ lock = WORK / "requirements.lock"
 lock.write_text(LOCK_TEXT)
 print("lock:", lock, flush=True)
 
-rc = sh(f"pip download -r '{lock}' -d '{WH}' --only-binary=:all: 2>&1 | tail -20")
+rc = sh(f"pip download -r '{lock}' -d '{WH}' --only-binary=:all: "
+        f"--extra-index-url https://download.pytorch.org/whl/cu126 2>&1 | tail -25")
 wheels = sorted(WH.glob("*.whl"))
 print(f"{len(wheels)} wheels, {sum(w.stat().st_size for w in wheels)/2**30:.2f} GB", flush=True)
+# A verifier that passes on an empty directory is not a verifier. The lock has ~30
+# requirements and torch alone pulls a dozen transitive wheels.
+assert len(wheels) >= 30, f"pip download produced only {len(wheels)} wheels (rc={rc})"
+assert any("torch-2.7.1+cu126" in w.name for w in wheels), "the cu126 torch wheel is missing"
 
 manifest = {}
 for w in wheels:
@@ -82,8 +87,9 @@ image = {"python": platform.python_version(), "platform": platform.platform(),
 print(json.dumps(image, indent=1), flush=True)
 
 # prove the wheelhouse is complete: install from it OFFLINE into a scratch prefix
+# Prove the set is COMPLETE by resolving dependencies too — --no-deps proved nothing.
 rc2 = sh(f"pip install --no-index --find-links='{WH}' -r '{lock}' --target /tmp/_proof "
-         f"--no-deps 2>&1 | tail -5")
+         f"2>&1 | tail -8")
 print("OFFLINE INSTALL:", "OK" if rc2 == 0 else f"FAILED rc={rc2}", flush=True)
 assert rc2 == 0, "the wheelhouse is incomplete — a production kernel would die at pip time"
 print("WHEELHOUSE COMPLETE", flush=True)
