@@ -113,15 +113,17 @@ from diffusers import WanImageToVideoPipeline, AutoencoderKLWan
 from diffusers.utils import export_to_video
 
 still = Image.open(OUT / "cover.png").convert("RGB")
-VW, VH = 704, 480                       # inside the card; 720P is 1280x704 and will not fit here
-NUM_FRAMES = 49                         # (4n+1); Wan's VAE is 4x temporal, keep it modest first
+VW, VH = 640, 448                       # 16-multiples; smaller first, then scale up on evidence
+NUM_FRAMES = 33                         # (4n+1); modest for the first proof that it runs at all
 
 vae = AutoencoderKLWan.from_pretrained("Wan-AI/Wan2.2-TI2V-5B-Diffusers",
                                        subfolder="vae", torch_dtype=torch.float32)
 vid_pipe = WanImageToVideoPipeline.from_pretrained(
     "Wan-AI/Wan2.2-TI2V-5B-Diffusers", vae=vae, torch_dtype=torch.bfloat16)
-vid_pipe.enable_model_cpu_offload()
-print("Wan2.2-TI2V-5B ready", flush=True)
+# Model-level offload left 14.80 GB resident and OOM'd on a 1.65 GB allocation. Sequential
+# offload streams the transformer layer by layer — the same fix that made Z-Image fit above.
+vid_pipe.enable_sequential_cpu_offload()
+print("Wan2.2-TI2V-5B ready (sequential offload)", flush=True)
 
 VID_PROMPT = ("The coals beneath the blade pulse and breathe with heat. Fine sparks drift upward "
               "through smoky air. Heat haze shimmers over the metal. The camera does not move.")

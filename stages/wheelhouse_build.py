@@ -55,11 +55,10 @@ def sh(c):
     print(r.stdout[-2000:] or r.stderr[-1500:], flush=True)
     return r.returncode
 
-lock = Path("/kaggle/input/aq-lock/requirements.lock") if Path("/kaggle/input/aq-lock").exists() \
-       else Path("requirements.lock")
-if not lock.exists():
-    lock = WORK / "requirements.lock"
-    lock.write_text(open(__file__).read().split("LOCK_TEXT = '''")[1].split("'''")[0])
+# The lock travels IN this file as LOCK_TEXT (a notebook cell has no __file__ — v1 death class:
+# a name that exists in a script and not in a papermill cell).
+lock = WORK / "requirements.lock"
+lock.write_text(LOCK_TEXT)
 print("lock:", lock, flush=True)
 
 rc = sh(f"pip download -r '{lock}' -d '{WH}' --only-binary=:all: 2>&1 | tail -20")

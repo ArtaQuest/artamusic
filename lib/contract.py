@@ -103,6 +103,8 @@ def check(kernel_path, metadata=None):
     v = []
     for name in unbound_names(tree):
         v.append(f"NAME: `{name}` used at module scope but never bound (v1 death: NameError after model load)")
+    if re.search(r"\b__file__\b", src):
+        v.append("NAME: `__file__` does not exist in a papermill notebook cell (v1 death: wheelhouse builder)")
     calls, strings = _module_calls_and_strings(tree)
     for c, why in FORBIDDEN_CALLS.items():
         if c in calls:
