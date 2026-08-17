@@ -88,3 +88,15 @@ recomputes targets from any local copy so instrument and target can never drift 
 ## Licence
 
 Code is MIT. The lyric under `song/` is © the ArtaQuest Foundation, all rights reserved.
+
+## Cover, v2 (2026-08-17)
+
+The illustration is now **Z-Image-Turbo** (6.15B, Apache, chosen from a live survey of the 81
+pipeline families in diffusers 0.39.0 and the sizes/gating on the HF API). It generates on the
+P100 under sequential CPU offload — four stills, one chosen by measured sharpness/warmth/darkness,
+with the human eye retaining a veto over the scorer. The result reads as a photograph where SDXL
+read as a game render, which was the operator's exact complaint.
+
+Motion is being moved to **Wan2.2-TI2V-5B** (Apache; LTX-Video's licence is `other`, flagged).
+The whole stack is being rebuilt under one invariant — *fail on the laptop, never on the card* —
+see `lib/contract.py`, `requirements.lock` and the wheelhouse kernel.
