@@ -117,11 +117,24 @@ def api():
     a = KaggleApi(); a.authenticate(); return a
 
 def to_ipynb(py, out):
+    """A stage file is ONE python file (so precheck/contract can parse it) that becomes many cells:
+    `# ── ` starts a code cell; `# %% [markdown]` starts a MARKDOWN cell whose comment lines are
+    the prose (leading `# ` stripped) — documentation that renders on Kaggle and in ArtaReader's
+    book page, while the .py stays valid python (they are comments there)."""
     src = Path(py).read_text()
-    marks = [m.start() for m in re.finditer(r"^# ── ", src, re.M)]
+    marks = [m.start() for m in re.finditer(r"^# ── |^# %% \[markdown\]", src, re.M)]
     bounds = [0] + marks + [len(src)]
-    cells = [{"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [],
-              "source": src[a:b].rstrip()} for a, b in zip(bounds, bounds[1:]) if src[a:b].strip()]
+    cells = []
+    for a, b in zip(bounds, bounds[1:]):
+        chunk = src[a:b].rstrip()
+        if not chunk.strip():
+            continue
+        if chunk.startswith("# %% [markdown]"):
+            body = "\n".join(re.sub(r"^# ?", "", l) for l in chunk.splitlines()[1:]).strip()
+            cells.append({"cell_type": "markdown", "metadata": {}, "source": body})
+        else:
+            cells.append({"cell_type": "code", "metadata": {}, "execution_count": None,
+                          "outputs": [], "source": chunk})
     Path(out).write_text(json.dumps({"cells": cells, "nbformat": 4, "nbformat_minor": 5,
         "metadata": {"kernelspec": {"name": "python3", "display_name": "Python 3",
                      "language": "python"}, "language_info": {"name": "python"}}}, indent=1))
@@ -200,7 +213,7 @@ def push_verified(slug, title, py, public=True, sources=(), tries=6, allow_viola
             if nbp:
                 cells = _j.loads(nbp.read_text()).get("cells", [])
                 pushed = "".join("".join(c["source"]) if isinstance(c["source"], list)
-                                 else c["source"] for c in cells)
+                                 else c["source"] for c in cells if c.get("cell_type") == "code")
             # Compare with ALL whitespace removed: to_ipynb rstrips each cell, so rejoining
             # them drops the newline at every cell boundary. Collapsing runs to a single space
             # still sees that as a difference and rejected pushes that had genuinely landed.
