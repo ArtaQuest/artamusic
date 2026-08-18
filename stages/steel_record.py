@@ -255,355 +255,10 @@ BPM, KEYSCALE = 100, "F minor"   # match the conditioning reference; a key fight
                                  # and a publication run is not where you run one
 
 # %% [markdown]
-# ## The instruments — pinned, and proven before anything expensive runs
-#
-# Every estimator this project ever used without a known‑truth self‑test turned out to be wrong,
-# so the measurement library is fetched from the public repo **at a commit sha** and its
-# self‑test is the first thing that runs. Register is measured with YIN on a **demucs‑isolated
-# vocal stem** (mix‑based estimators lock onto the 808s), and reported as a distribution — median
-# classifies, modes are disclosed. Intelligibility is **whisper large‑v3 word accuracy** against
-# the exact lyric above, on the separated stem, chunked at quiet points. The ASR model is loaded
-# per call and released, never left parked in front of a 12 GB render.
-
-# ── measure.py at its pin; whisper and demucs on demand ─────────────────────────────────
-urllib.request.urlretrieve(
-    f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['measure_sha']}/lib/measure.py",
-    "/tmp/measure.py")
-import measure as M
-assert M.selftest(), "measurement selftest FAILED — no number from this build can be trusted"
-
-_WH = [None, None]   # model, judged_by
-def asr():
-    from faster_whisper import WhisperModel
-    if _WH[0] is None:
-        try:
-            _WH[0] = WhisperModel(PINS["asr"], device="cuda", compute_type="float32")
-            _WH[1] = f"{PINS['asr']}/cuda-float32"
-        except Exception as e:
-            print(f"GPU ASR unavailable ({str(e)[:80]}) — CPU int8 fallback", flush=True)
-            _WH[0] = WhisperModel(PINS["asr"], device="cpu", compute_type="int8")
-            _WH[1] = f"{PINS['asr']}/cpu-int8"
-        print("ASR judge:", _WH[1], flush=True)
-    return _WH[0]
-
-def asr_release():
-    _WH[0] = None
-    gc.collect(); torch.cuda.empty_cache()
-
-def _vocal_stem(mp3):
-    """One separation, shared by register and words — the stem is where the voice is."""
-    import demucs.separate, shlex, tempfile as _tf
-    td = _tf.mkdtemp()
-    demucs.separate.main(shlex.split(f'--two-stems vocals -n htdemucs --device cpu -o "{td}" "{mp3}"'))
-    src = next(Path(td).rglob("vocals.wav"), None)
-    if src is None:
-        return None
-    keep = Path(_tf.mkdtemp()) / "vocals.wav"
-    shutil.copy(src, keep)
-    return str(keep)
-
-def word_accuracy(mp3, lyric_text, stem=None):
-    # transcribe the SEPARATED STEM, chunked at quiet points into ~20 s segments (ICME-2025 recipe)
-    target = stem or mp3
-    segs, _ = asr().transcribe(str(target), beam_size=5, vad_filter=True,
-                               vad_parameters=dict(min_silence_duration_ms=400),
-                               chunk_length=20, condition_on_previous_text=False)
-    hyp = re.findall(r"[a-z']+", " ".join(s.text for s in segs).lower())
-    asr_release()
-    ref = re.findall(r"[a-z']+", re.sub(r"\[[^\]]*\]", " ", lyric_text.lower()))
-    d = np.zeros((len(ref)+1, len(hyp)+1), dtype=np.int32)
-    d[:,0] = np.arange(len(ref)+1); d[0,:] = np.arange(len(hyp)+1)
-    for i in range(1, len(ref)+1):
-        for j in range(1, len(hyp)+1):
-            d[i,j] = min(d[i-1,j]+1, d[i,j-1]+1, d[i-1,j-1]+(ref[i-1]!=hyp[j-1]))
-    return 1.0 - min(1.0, float(d[-1,-1])/max(1,len(ref)))
-
-def register_gate(mp3):
-    reg = M.register(str(mp3))
-    return reg.get("register") == "male", reg
-
-# the male voice reference — KEEP THE KEY's lead, the cleanest male vocal this pipeline owns
-# (156 Hz median, 6.65 st spread), mounted from its PUBLIC kernel so the reference stays public
-_ref = sorted(glob.glob("/kaggle/input/**/KEEPTHEKEY.mp3", recursive=True))
-MALE_REF = _ref[0] if _ref else None
-assert MALE_REF, "male reference not mounted (kernel source artafather/keep-the-key)"
-print("male reference:", MALE_REF, flush=True)
-clock("instruments proven")
-
-# %% [markdown]
-# ## The song — ACE-Step 1.5 XL, style transfer from a public male take, best of four by measurement
-#
-# Captions are not a control over vocal register (one male take in fifteen, measured), so the
-# render is **style transfer**: text‑to‑music with the public KEEP THE KEY lead as `reference_audio`
-# at strength 0.35 — the words stay text‑driven while the reference biases the timbre. Four seeds
-# are rendered at 80 ODE steps, guidance 7.5, 180 s, and **every** take is gated on the isolated
-# stem: register must measure male, word accuracy must reach 75%. Of the takes that pass, the one
-# with the **highest word accuracy** ships (ties go to the tighter pitch spread). If nothing
-# passes, the most intelligible non‑male take is converted to the male reference with zero‑shot
-# Seed‑VC and gated again — a deterministic repair rather than another roll of the dice.
-# The whole gate log is published beside the song.
-
-# ── the 4.6B model: a ladder of ways to hold it on the card ─────────────────────────────
-sys.path.insert(0, str(REPO))
-import toml
-from acestep.handler import AceStepHandler
-
-LADDER = ([("xl-resident", PINS["song_model"], "bfloat16", False, False),
-           ("xl-offload",  PINS["song_model"], "bfloat16", True,  False),
-           ("xl-dit-swap", PINS["song_model"], "bfloat16", True,  True)] if BF16 else []) + \
-         [("sft-fp32", "acestep-v15-sft", "float32", False, False)]
-
-# ACE-Step picks fp16 on any card without bf16 hardware, and fp16 overflows to NaN in the 4.6B
-# DiT; bf16 has float32's range and runs (emulated) on Pascal and Turing. Honour our own env var.
-orch = REPO / "acestep/core/generation/handler/init_service_orchestrator.py"
-src = orch.read_text()
-OLD = """            elif resolved_device == "cuda":
-                if gpu_config.cuda_supports_bfloat16():
-                    self.dtype = torch.bfloat16
-                else:
-                    self.dtype = torch.float16"""
-NEW = """            elif resolved_device == "cuda":
-                _f = os.environ.get("AQ_FORCE_DTYPE", "")
-                if _f:
-                    self.dtype = {"float32": torch.float32, "bfloat16": torch.bfloat16,
-                                  "float16": torch.float16}[_f]
-                elif gpu_config.cuda_supports_bfloat16():
-                    self.dtype = torch.bfloat16
-                else:
-                    self.dtype = torch.float16"""
-assert OLD in src, "ACE-Step changed under its pin — impossible unless the checkout failed"
-orch.write_text(src.replace(OLD, NEW, 1))
-
-def render_conf(name, seed, strength, rung, steps, duration):
-    return {"project_root": str(REPO), "config_path": rung["model"], "checkpoint_dir": str(CKPT),
-            "save_dir": str(TMP / f"out_{name}"), "audio_format": "flac", "device": "cuda",
-            "offload_to_cpu": rung["offload_to_cpu"], "offload_dit_to_cpu": rung["offload_dit_to_cpu"],
-            "task_type": "text2music", "reference_audio": MALE_REF, "audio_cover_strength": strength,
-            "caption": CAPTION, "lyrics": LYRICS, "instrumental": False,
-            "bpm": BPM, "keyscale": KEYSCALE, "timesignature": "4/4", "vocal_language": "en",
-            "duration": duration, "inference_steps": steps, "guidance_scale": 7.5,
-            "seed": seed, "infer_method": "ode",
-            "thinking": False, "use_cot_metas": False, "use_cot_caption": False,
-            "use_cot_lyrics": False, "use_cot_language": False,
-            "batch_size": 1, "use_random_seed": False, "seeds": [seed]}
-
-def cli_render(name, conf_dict, dtype):
-    """One render through ACE-Step's own CLI in its own process (the GPU is clean afterwards).
-    Whole output to a file, no pipes: the line's rc is then genuinely the CLI's."""
-    conf = TMP / f"{name}.toml"; conf.write_text(toml.dumps(conf_dict))
-    rc = sh(f"cd {REPO} && AQ_FORCE_DTYPE={dtype} PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True "
-            f"PYTORCH_ALLOC_CONF=expandable_segments:True ACESTEP_GENERATION_TIMEOUT=2400 "
-            f"python cli.py -c {conf} --backend pt --log-level INFO > /tmp/cli_{name}.txt 2>&1", quiet=True)
-    found = sorted(Path(TMP / f"out_{name}").rglob("*.flac")) + sorted(Path(TMP / f"out_{name}").rglob("*.wav"))
-    tail = Path(f"/tmp/cli_{name}.txt").read_text()[-900:] if Path(f"/tmp/cli_{name}.txt").exists() else ""
-    return rc, found, tail
-
-# A rung is not held because the model LOADED — it is held because it RENDERED. The first run on a
-# T4 pair loaded the resident rung at 12.1 GB and then every take OOM'd inside the CLI on a 1.2 GB
-# attention buffer (rc 0, no file: ACE-Step suppresses rather than crashes). So each rung is probed
-# with a FULL-LENGTH render at 2 steps — attention buffers scale with the sequence, not the steps —
-# and only a rung that produces audio is kept.
-chosen = None
-for name, model, dtype, oc, od in LADDER:
-    torch.cuda.empty_cache(); torch.cuda.reset_peak_memory_stats()
-    os.environ["AQ_FORCE_DTYPE"] = dtype
-    t0 = time.time()
-    try:
-        h = AceStepHandler()
-        h.initialize_service(project_root=str(REPO), config_path=model, device="cuda",
-                             offload_to_cpu=oc, offload_dit_to_cpu=od)
-        peak = torch.cuda.max_memory_allocated() / 2**30
-        del h; gc.collect(); torch.cuda.empty_cache()
-    except Exception as e:
-        print(f"rung {name}: load failed — {type(e).__name__}: {str(e)[:100]}", flush=True)
-        torch.cuda.empty_cache(); continue
-    rung = dict(rung=name, model=model, dtype=dtype, offload_to_cpu=oc, offload_dit_to_cpu=od,
-                peak_gb=round(peak, 2))
-    rc, found, tail = cli_render(f"probe_{name}", render_conf(f"probe_{name}", SEED, 0.35, rung, 2, DURATION), dtype)
-    if found:
-        rung["probe_seconds"] = round(time.time() - t0, 1)
-        print(f"RUNG HELD: {name} — {model} @ {dtype}, load peak {peak:.2f} GB, full-length probe "
-              f"rendered in {time.time()-t0:.0f}s", flush=True)
-        chosen = rung; break
-    print(f"rung {name}: loaded ({peak:.2f} GB) but the full-length probe produced no audio (rc={rc}):\n"
-          f"{tail[-400:]}", flush=True)
-assert chosen, "no rung held"
-(WORK / "rung.json").write_text(json.dumps({**chosen, "pins": {k: v for k, v in PINS.items()
-                                                               if isinstance(v, str)},
-                                            "seed": SEED}, indent=2))
-clock("song model held")
-
-# ── four takes: render every one, gate every one, keep the best passer ───────────────────
-CANDIDATES = [(6001, 0.35), (6002, 0.35), (6003, 0.35), (6004, 0.35)]
-gate_log, passers = [], []
-for seed, strength in CANDIDATES:
-    name = f"cand{seed}"
-    t0 = time.time()
-    rc, found, tail = cli_render(name, render_conf(name, seed, strength, chosen, 80, DURATION), chosen["dtype"])
-    row = {"seed": seed, "seconds": round(time.time()-t0, 1), "steps": 80,
-           "cover_strength": strength, "model": chosen["model"], "dtype": chosen["dtype"],
-           "rung": chosen["rung"]}
-    if not found:
-        row["verdict"] = f"no audio (rc={rc})"; row["cli_tail"] = tail
-        gate_log.append(row); (WORK / "gate.json").write_text(json.dumps(gate_log, indent=2))
-        print(f"{name}: no audio rc={rc}\n{tail[-400:]}", flush=True); continue
-    mp3 = OUT / f"{name}.mp3"
-    sh(f"ffmpeg -v error -i '{max(found, key=lambda p: p.stat().st_size)}' "
-       f"-codec:a libmp3lame -b:a 320k '{mp3}' -y", quiet=True)
-    stem = _vocal_stem(mp3)
-    ok_reg, reg = register_gate(mp3)
-    acc = word_accuracy(mp3, LYRICS, stem=stem)
-    row.update(register=reg, word_accuracy=round(acc, 3), asr_judge=_WH[1])
-    ok_words = acc >= 0.75
-    row["verdict"] = "PASS" if (ok_reg and ok_words) else \
-        f"REJECTED ({reg.get('register')}{'' if ok_words else f' words {acc*100:.0f}%'})"
-    gate_log.append(row); (WORK / "gate.json").write_text(json.dumps(gate_log, indent=2))
-    print(f"{name}: median={reg.get('f0_hz')}Hz [{reg.get('register')}] "
-          f"spread={reg.get('spread_st')}st lead={reg.get('lead_hz')}Hz@{reg.get('lead_frac')} "
-          f"words={acc*100:.1f}% -> {row['verdict']} · {row['seconds']:.0f}s", flush=True)
-    if ok_reg and ok_words:
-        passers.append((acc, -float(reg.get("spread_st") or 99), mp3, seed))
-    clock(f"{name} gated")
-
-WINNER, WINNER_ACC, WINNER_SEED = None, None, None
-if passers:
-    passers.sort(reverse=True)
-    WINNER_ACC, _, WINNER, WINNER_SEED = passers[0]
-    for r in gate_log:
-        if r.get("seed") == WINNER_SEED and r.get("verdict") == "PASS":
-            r["verdict"] = "ACCEPTED — best words of the passers"
-    (WORK / "gate.json").write_text(json.dumps(gate_log, indent=2))
-    print(f"\nWINNER: seed {WINNER_SEED} · words {WINNER_ACC*100:.1f}% · "
-          f"{len(passers)} of {len(CANDIDATES)} passed", flush=True)
-
-# ── the repair path: zero-shot Seed-VC to the male reference, only if nothing passed ─────
-if WINNER is None:
-    repairable = [r for r in gate_log
-                  if r.get("word_accuracy", 0) >= 0.80 and (r.get("register") or {}).get("register") != "male"]
-    if repairable:
-        best = max(repairable, key=lambda r: r["word_accuracy"])
-        print(f"\nSVC REPAIR: converting seed {best['seed']}'s vocal to the male reference", flush=True)
-        # Seed-VC in its OWN package tree (pip --target + PYTHONPATH): its requirements broke the
-        # shared transformers once; venv is unavailable (Kaggle's ensurepip is broken).
-        sh("git clone -q https://github.com/Plachtaa/seed-vc /tmp/seedvc")
-        sh("pip install -q --target /tmp/svcdeps -r /tmp/seedvc/requirements.txt 2>&1 | tail -2")
-        if PASCAL:
-            sh("pip install -q --target /tmp/svcdeps --upgrade --force-reinstall "
-               "torch==2.7.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu126 2>&1 | tail -1")
-        # the PyPI 'typing'/'dataclasses' backports shadow the stdlib; the pyOpenSSL/cryptography
-        # pair must come from ONE tree — evict them from the overlay (each was a dead run once)
-        sh("rm -f /tmp/svcdeps/typing.py /tmp/svcdeps/dataclasses.py && "
-           "rm -rf /tmp/svcdeps/typing-*.dist-info /tmp/svcdeps/dataclasses-*.dist-info "
-           "/tmp/svcdeps/typing /tmp/svcdeps/dataclasses /tmp/svcdeps/OpenSSL /tmp/svcdeps/pyOpenSSL* "
-           "/tmp/svcdeps/pyopenssl* /tmp/svcdeps/cryptography /tmp/svcdeps/cryptography-*")
-        rc0 = sh("PYTHONPATH=/tmp/svcdeps python -c 'import typing, dataclasses, numpy, torch, "
-                 "OpenSSL, yaml, librosa, soundfile, transformers; "
-                 "print(\"svcdeps tree clean, torch\", torch.__version__)'")
-        cand = OUT / f"cand{best['seed']}.mp3"
-        stem = _vocal_stem(str(cand))
-        import soundfile as sf
-        acc_wav = str(Path(stem).parent / "acc.wav")
-        sh(f"ffmpeg -v error -i '{cand}' -ar 44100 -ac 2 /tmp/_mix.wav -y", quiet=True)
-        mix, sr_ = sf.read("/tmp/_mix.wav"); voc, _ = sf.read(stem)
-        n = min(len(mix), len(voc)); sf.write(acc_wav, mix[:n] - voc[:n], sr_)
-        conv_dir = "/tmp/svc_out"
-        rc = 1 if rc0 else sh(f"cd /tmp/seedvc && PYTHONPATH=/tmp/svcdeps python inference.py --source '{stem}' "
-                              f"--target '{MALE_REF}' --output {conv_dir} "
-                              f"--diffusion-steps 50 --length-adjust 1.0 --inference-cfg-rate 0.7 "
-                              f"--f0-condition True --auto-f0-adjust True > /tmp/svc.log 2>&1")
-        conv = sorted(Path(conv_dir).glob("*.wav"), key=lambda q: q.stat().st_mtime)
-        if rc == 0 and conv:
-            fixed = OUT / f"cand{best['seed']}_svc.mp3"
-            sh(f"ffmpeg -v error -i '{conv[-1]}' -i '{acc_wav}' "
-               f"-filter_complex '[0:a][1:a]amix=inputs=2:duration=shortest:normalize=0' "
-               f"-codec:a libmp3lame -b:a 320k '{fixed}' -y", quiet=True)
-            stem2 = _vocal_stem(str(fixed))
-            ok2, reg2 = register_gate(fixed)
-            acc2 = word_accuracy(fixed, LYRICS, stem=stem2)
-            row2 = {"seed": best["seed"], "svc_repaired": True, "register": reg2,
-                    "word_accuracy": round(acc2, 3),
-                    "verdict": "ACCEPTED post-SVC" if (ok2 and acc2 >= 0.75) else
-                               f"REJECTED post-SVC ({reg2.get('register')} words {acc2*100:.0f}%)"}
-            gate_log.append(row2); (WORK / "gate.json").write_text(json.dumps(gate_log, indent=2))
-            print(f"post-SVC: {reg2.get('f0_hz')}Hz [{reg2.get('register')}] words {acc2*100:.1f}% "
-                  f"-> {row2['verdict']}", flush=True)
-            if ok2 and acc2 >= 0.75:
-                WINNER, WINNER_ACC, WINNER_SEED = fixed, acc2, best["seed"]
-        else:
-            print(f"SVC conversion failed (rc={rc}); log tail: "
-                  f"{Path('/tmp/svc.log').read_text()[-400:] if Path('/tmp/svc.log').exists() else ''}",
-                  flush=True)
-
-assert WINNER, "no candidate passed the male+intelligible gate — refusing to master a wrong take"
-shutil.copy(WINNER, WORK / "take_raw.mp3")
-clock("song chosen")
-
-# %% [markdown]
-# ## Mastering — measured, never trusted
-#
-# Static gain to −10 LUFS, then a 4×‑oversampled true‑peak limiter at −1 dBTP, then
-# **measure the encoded mp3 and correct** (LAME overshoots; a target you never re‑measure is how a
-# record ships at −0.8 dBTP against a −1.0 promise). Never `loudnorm`'s second pass: it silently
-# discards `linear=true` when the target is unreachable and rides gain instead. Two masters are
-# made — direct, and tonally matched to the reference with matchering — and the one whose
-# **word accuracy** survives better ships; the choice is recorded.
-
-# ── master: static gain, oversampled limiter, measure-then-correct; the arm chosen by words ──
-TARGET_LUFS, TARGET_TP = -10.0, -1.0
-wav, mp3 = OUT / "STEEL.wav", OUT / "STEEL.mp3"
-
-def finish(src, wav_out, mp3_out):
-    ceiling, iters = TARGET_TP, []
-    for it in range(3):
-        a = M.loudness(src)
-        g = TARGET_LUFS - (a["lufs"] if a["lufs"] is not None else -14.0)
-        lim = 10 ** (ceiling / 20)
-        af = (f"volume={g:.2f}dB,aresample=176400,"
-              f"alimiter=limit={lim:.5f}:level=disabled,aresample=44100")
-        sh(f"ffmpeg -v error -i '{src}' -af '{af}' -ar 44100 '{wav_out}' -y", quiet=True)
-        sh(f"ffmpeg -v error -i '{wav_out}' -codec:a libmp3lame -b:a 320k '{mp3_out}' -y", quiet=True)
-        got = M.loudness(mp3_out)
-        iters.append({"ceiling_db": round(ceiling, 2), **{k: got.get(k) for k in
-                      ("lufs", "lra_lu", "true_peak_dbtp", "peak_dbfs", "clipped")}})
-        tp = got.get("true_peak_dbtp")
-        if tp is None or tp <= TARGET_TP + 0.05:
-            break
-        ceiling -= (tp - TARGET_TP) + 0.1
-    return iters
-
-MATCH_IN = None
-try:
-    import matchering as mg
-    sh(f"ffmpeg -v error -i '{WINNER}' -ar 44100 /tmp/_target.wav -y", quiet=True)
-    sh(f"ffmpeg -v error -i '{MALE_REF}' -ar 44100 /tmp/_ref.wav -y", quiet=True)
-    mg.process(target="/tmp/_target.wav", reference="/tmp/_ref.wav",
-               results=[mg.Result("/tmp/_matched.wav", "FLOAT", use_limiter=False, normalize=False)])
-    MATCH_IN = "/tmp/_matched.wav"
-except Exception as e:
-    print(f"matchering unavailable ({str(e)[:80]}) — direct master only", flush=True)
-
-arms, master_iters = {}, {}
-master_iters["direct"] = finish(str(WINNER), str(OUT / "_direct.wav"), str(OUT / "_direct.mp3"))
-arms["direct"] = {"wav": str(OUT / "_direct.wav"), "mp3": str(OUT / "_direct.mp3")}
-if MATCH_IN:
-    master_iters["matched"] = finish(MATCH_IN, str(OUT / "_matched.wav"), str(OUT / "_matched.mp3"))
-    arms["matched"] = {"wav": str(OUT / "_matched.wav"), "mp3": str(OUT / "_matched.mp3")}
-scores = {}
-for name, files in arms.items():
-    st = _vocal_stem(files["mp3"])
-    scores[name] = {"words": round(word_accuracy(files["mp3"], LYRICS, stem=st), 3)}
-    print(f"master arm {name}: words {scores[name]['words']*100:.1f}%", flush=True)
-best_arm = max(arms, key=lambda k: scores[k]["words"])
-print(f"master choice by measurement: {best_arm}", flush=True)
-shutil.copy(arms[best_arm]["wav"], wav); shutil.copy(arms[best_arm]["mp3"], mp3)
-(WORK / "master.json").write_text(json.dumps({"arm_chosen": best_arm, "arm_scores": scores,
-                                              "iterations": master_iters}, indent=2))
-for f in ("_direct.wav", "_direct.mp3", "_matched.wav", "_matched.mp3"):
-    (OUT / f).unlink(missing_ok=True)
-clock("mastered")
-
-# %% [markdown]
 # ## The cover still — Z-Image-Turbo, four seeds, the choice recorded
+#
+# The cover is made before the song on purpose: it is the cheaper stage and the one with the newest
+# machinery, so a failure there is found in half an hour, and the song then renders on a clean card.
 #
 # Z‑Image‑Turbo (6.15B, Apache‑2.0, CFG‑distilled: 9 steps, guidance 0) reads as a photograph
 # where SDXL read as a game render. It runs on a 16 GB card only under **sequential CPU offload**
@@ -872,6 +527,354 @@ for size in (640, 576, 480):
 assert loop_rec, "no loop was produced at any size"
 del wan_pipe; gc.collect(); torch.cuda.empty_cache()
 clock("loop delivered")
+
+# %% [markdown]
+# ## The instruments — pinned, and proven before anything expensive runs
+#
+# Every estimator this project ever used without a known‑truth self‑test turned out to be wrong,
+# so the measurement library is fetched from the public repo **at a commit sha** and its
+# self‑test is the first thing that runs. Register is measured with YIN on a **demucs‑isolated
+# vocal stem** (mix‑based estimators lock onto the 808s), and reported as a distribution — median
+# classifies, modes are disclosed. Intelligibility is **whisper large‑v3 word accuracy** against
+# the exact lyric above, on the separated stem, chunked at quiet points. The ASR model is loaded
+# per call and released, never left parked in front of a 12 GB render.
+
+# ── measure.py at its pin; whisper and demucs on demand ─────────────────────────────────
+urllib.request.urlretrieve(
+    f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['measure_sha']}/lib/measure.py",
+    "/tmp/measure.py")
+import measure as M
+assert M.selftest(), "measurement selftest FAILED — no number from this build can be trusted"
+
+_WH = [None, None]   # model, judged_by
+def asr():
+    from faster_whisper import WhisperModel
+    if _WH[0] is None:
+        try:
+            _WH[0] = WhisperModel(PINS["asr"], device="cuda", compute_type="float32")
+            _WH[1] = f"{PINS['asr']}/cuda-float32"
+        except Exception as e:
+            print(f"GPU ASR unavailable ({str(e)[:80]}) — CPU int8 fallback", flush=True)
+            _WH[0] = WhisperModel(PINS["asr"], device="cpu", compute_type="int8")
+            _WH[1] = f"{PINS['asr']}/cpu-int8"
+        print("ASR judge:", _WH[1], flush=True)
+    return _WH[0]
+
+def asr_release():
+    _WH[0] = None
+    gc.collect(); torch.cuda.empty_cache()
+
+def _vocal_stem(mp3):
+    """One separation, shared by register and words — the stem is where the voice is."""
+    import demucs.separate, shlex, tempfile as _tf
+    td = _tf.mkdtemp()
+    demucs.separate.main(shlex.split(f'--two-stems vocals -n htdemucs --device cpu -o "{td}" "{mp3}"'))
+    src = next(Path(td).rglob("vocals.wav"), None)
+    if src is None:
+        return None
+    keep = Path(_tf.mkdtemp()) / "vocals.wav"
+    shutil.copy(src, keep)
+    return str(keep)
+
+def word_accuracy(mp3, lyric_text, stem=None):
+    # transcribe the SEPARATED STEM, chunked at quiet points into ~20 s segments (ICME-2025 recipe)
+    target = stem or mp3
+    segs, _ = asr().transcribe(str(target), beam_size=5, vad_filter=True,
+                               vad_parameters=dict(min_silence_duration_ms=400),
+                               chunk_length=20, condition_on_previous_text=False)
+    hyp = re.findall(r"[a-z']+", " ".join(s.text for s in segs).lower())
+    asr_release()
+    ref = re.findall(r"[a-z']+", re.sub(r"\[[^\]]*\]", " ", lyric_text.lower()))
+    d = np.zeros((len(ref)+1, len(hyp)+1), dtype=np.int32)
+    d[:,0] = np.arange(len(ref)+1); d[0,:] = np.arange(len(hyp)+1)
+    for i in range(1, len(ref)+1):
+        for j in range(1, len(hyp)+1):
+            d[i,j] = min(d[i-1,j]+1, d[i,j-1]+1, d[i-1,j-1]+(ref[i-1]!=hyp[j-1]))
+    return 1.0 - min(1.0, float(d[-1,-1])/max(1,len(ref)))
+
+def register_gate(mp3):
+    reg = M.register(str(mp3))
+    return reg.get("register") == "male", reg
+
+# the male voice reference — KEEP THE KEY's lead, the cleanest male vocal this pipeline owns
+# (156 Hz median, 6.65 st spread), mounted from its PUBLIC kernel so the reference stays public
+_ref = sorted(glob.glob("/kaggle/input/**/KEEPTHEKEY.mp3", recursive=True))
+MALE_REF = _ref[0] if _ref else None
+assert MALE_REF, "male reference not mounted (kernel source artafather/keep-the-key)"
+print("male reference:", MALE_REF, flush=True)
+clock("instruments proven")
+
+# %% [markdown]
+# ## The song — ACE-Step 1.5 XL, style transfer from a public male take, best of six by measurement
+#
+# Captions are not a control over vocal register (one male take in fifteen, measured), so the
+# render is **style transfer**: text‑to‑music with the public KEEP THE KEY lead as `reference_audio`
+# at strength 0.35 — the words stay text‑driven while the reference biases the timbre. Six seeds
+# are rendered at 80 ODE steps, guidance 7.5, 180 s, and **every** take is gated on the isolated
+# stem: register must measure male, word accuracy must reach 75%. Of the takes that pass, the one
+# with the **highest word accuracy** ships (ties go to the tighter pitch spread). If nothing
+# passes, the most intelligible non‑male take is converted to the male reference with zero‑shot
+# Seed‑VC and gated again — a deterministic repair rather than another roll of the dice.
+# The whole gate log is published beside the song.
+
+# ── the 4.6B model: a ladder of ways to hold it on the card ─────────────────────────────
+sys.path.insert(0, str(REPO))
+import toml
+from acestep.handler import AceStepHandler
+
+LADDER = ([("xl-resident", PINS["song_model"], "bfloat16", False, False),
+           ("xl-offload",  PINS["song_model"], "bfloat16", True,  False),
+           ("xl-dit-swap", PINS["song_model"], "bfloat16", True,  True)] if BF16 else []) + \
+         [("sft-fp32", "acestep-v15-sft", "float32", False, False)]
+
+# ACE-Step picks fp16 on any card without bf16 hardware, and fp16 overflows to NaN in the 4.6B
+# DiT; bf16 has float32's range and runs (emulated) on Pascal and Turing. Honour our own env var.
+orch = REPO / "acestep/core/generation/handler/init_service_orchestrator.py"
+src = orch.read_text()
+OLD = """            elif resolved_device == "cuda":
+                if gpu_config.cuda_supports_bfloat16():
+                    self.dtype = torch.bfloat16
+                else:
+                    self.dtype = torch.float16"""
+NEW = """            elif resolved_device == "cuda":
+                _f = os.environ.get("AQ_FORCE_DTYPE", "")
+                if _f:
+                    self.dtype = {"float32": torch.float32, "bfloat16": torch.bfloat16,
+                                  "float16": torch.float16}[_f]
+                elif gpu_config.cuda_supports_bfloat16():
+                    self.dtype = torch.bfloat16
+                else:
+                    self.dtype = torch.float16"""
+assert OLD in src, "ACE-Step changed under its pin — impossible unless the checkout failed"
+orch.write_text(src.replace(OLD, NEW, 1))
+
+def render_conf(name, seed, strength, rung, steps, duration):
+    return {"project_root": str(REPO), "config_path": rung["model"], "checkpoint_dir": str(CKPT),
+            "save_dir": str(TMP / f"out_{name}"), "audio_format": "flac", "device": "cuda",
+            "offload_to_cpu": rung["offload_to_cpu"], "offload_dit_to_cpu": rung["offload_dit_to_cpu"],
+            "task_type": "text2music", "reference_audio": MALE_REF, "audio_cover_strength": strength,
+            "caption": CAPTION, "lyrics": LYRICS, "instrumental": False,
+            "bpm": BPM, "keyscale": KEYSCALE, "timesignature": "4/4", "vocal_language": "en",
+            "duration": duration, "inference_steps": steps, "guidance_scale": 7.5,
+            "seed": seed, "infer_method": "ode",
+            "thinking": False, "use_cot_metas": False, "use_cot_caption": False,
+            "use_cot_lyrics": False, "use_cot_language": False,
+            "batch_size": 1, "use_random_seed": False, "seeds": [seed]}
+
+def cli_render(name, conf_dict, dtype):
+    """One render through ACE-Step's own CLI in its own process (the GPU is clean afterwards).
+    Whole output to a file, no pipes: the line's rc is then genuinely the CLI's."""
+    conf = TMP / f"{name}.toml"; conf.write_text(toml.dumps(conf_dict))
+    rc = sh(f"cd {REPO} && AQ_FORCE_DTYPE={dtype} PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True "
+            f"PYTORCH_ALLOC_CONF=expandable_segments:True ACESTEP_GENERATION_TIMEOUT=2400 "
+            f"python cli.py -c {conf} --backend pt --log-level INFO > /tmp/cli_{name}.txt 2>&1", quiet=True)
+    found = sorted(Path(TMP / f"out_{name}").rglob("*.flac")) + sorted(Path(TMP / f"out_{name}").rglob("*.wav"))
+    tail = Path(f"/tmp/cli_{name}.txt").read_text()[-900:] if Path(f"/tmp/cli_{name}.txt").exists() else ""
+    return rc, found, tail
+
+# A rung is not held because the model LOADED — it is held because it RENDERED. The first run on a
+# T4 pair loaded the resident rung at 12.1 GB and then every take OOM'd inside the CLI on a 1.2 GB
+# attention buffer (rc 0, no file: ACE-Step suppresses rather than crashes). So each rung is probed
+# with a FULL-LENGTH render at 2 steps — attention buffers scale with the sequence, not the steps —
+# and only a rung that produces audio is kept.
+chosen = None
+for name, model, dtype, oc, od in LADDER:
+    torch.cuda.empty_cache(); torch.cuda.reset_peak_memory_stats()
+    os.environ["AQ_FORCE_DTYPE"] = dtype
+    t0 = time.time()
+    try:
+        h = AceStepHandler()
+        h.initialize_service(project_root=str(REPO), config_path=model, device="cuda",
+                             offload_to_cpu=oc, offload_dit_to_cpu=od)
+        peak = torch.cuda.max_memory_allocated() / 2**30
+        del h; gc.collect(); torch.cuda.empty_cache()
+    except Exception as e:
+        print(f"rung {name}: load failed — {type(e).__name__}: {str(e)[:100]}", flush=True)
+        torch.cuda.empty_cache(); continue
+    rung = dict(rung=name, model=model, dtype=dtype, offload_to_cpu=oc, offload_dit_to_cpu=od,
+                peak_gb=round(peak, 2))
+    rc, found, tail = cli_render(f"probe_{name}", render_conf(f"probe_{name}", SEED, 0.35, rung, 2, DURATION), dtype)
+    if found:
+        rung["probe_seconds"] = round(time.time() - t0, 1)
+        print(f"RUNG HELD: {name} — {model} @ {dtype}, load peak {peak:.2f} GB, full-length probe "
+              f"rendered in {time.time()-t0:.0f}s", flush=True)
+        chosen = rung; break
+    print(f"rung {name}: loaded ({peak:.2f} GB) but the full-length probe produced no audio (rc={rc}):\n"
+          f"{tail[-400:]}", flush=True)
+assert chosen, "no rung held"
+(WORK / "rung.json").write_text(json.dumps({**chosen, "pins": {k: v for k, v in PINS.items()
+                                                               if isinstance(v, str)},
+                                            "seed": SEED}, indent=2))
+clock("song model held")
+
+# ── four takes: render every one, gate every one, keep the best passer ───────────────────
+CANDIDATES = [(6001, 0.35), (6002, 0.35), (6003, 0.35), (6004, 0.35), (6005, 0.35), (6006, 0.35)]
+gate_log, passers = [], []
+for seed, strength in CANDIDATES:
+    name = f"cand{seed}"
+    t0 = time.time()
+    rc, found, tail = cli_render(name, render_conf(name, seed, strength, chosen, 80, DURATION), chosen["dtype"])
+    row = {"seed": seed, "seconds": round(time.time()-t0, 1), "steps": 80,
+           "cover_strength": strength, "model": chosen["model"], "dtype": chosen["dtype"],
+           "rung": chosen["rung"]}
+    if not found:
+        row["verdict"] = f"no audio (rc={rc})"; row["cli_tail"] = tail
+        gate_log.append(row); (WORK / "gate.json").write_text(json.dumps(gate_log, indent=2))
+        print(f"{name}: no audio rc={rc}\n{tail[-400:]}", flush=True); continue
+    mp3 = OUT / f"{name}.mp3"
+    sh(f"ffmpeg -v error -i '{max(found, key=lambda p: p.stat().st_size)}' "
+       f"-codec:a libmp3lame -b:a 320k '{mp3}' -y", quiet=True)
+    stem = _vocal_stem(mp3)
+    ok_reg, reg = register_gate(mp3)
+    acc = word_accuracy(mp3, LYRICS, stem=stem)
+    row.update(register=reg, word_accuracy=round(acc, 3), asr_judge=_WH[1])
+    ok_words = acc >= 0.75
+    row["verdict"] = "PASS" if (ok_reg and ok_words) else \
+        f"REJECTED ({reg.get('register')}{'' if ok_words else f' words {acc*100:.0f}%'})"
+    gate_log.append(row); (WORK / "gate.json").write_text(json.dumps(gate_log, indent=2))
+    print(f"{name}: median={reg.get('f0_hz')}Hz [{reg.get('register')}] "
+          f"spread={reg.get('spread_st')}st lead={reg.get('lead_hz')}Hz@{reg.get('lead_frac')} "
+          f"words={acc*100:.1f}% -> {row['verdict']} · {row['seconds']:.0f}s", flush=True)
+    if ok_reg and ok_words:
+        passers.append((acc, -float(reg.get("spread_st") or 99), mp3, seed))
+    clock(f"{name} gated")
+
+WINNER, WINNER_ACC, WINNER_SEED = None, None, None
+if passers:
+    passers.sort(reverse=True)
+    WINNER_ACC, _, WINNER, WINNER_SEED = passers[0]
+    for r in gate_log:
+        if r.get("seed") == WINNER_SEED and r.get("verdict") == "PASS":
+            r["verdict"] = "ACCEPTED — best words of the passers"
+    (WORK / "gate.json").write_text(json.dumps(gate_log, indent=2))
+    print(f"\nWINNER: seed {WINNER_SEED} · words {WINNER_ACC*100:.1f}% · "
+          f"{len(passers)} of {len(CANDIDATES)} passed", flush=True)
+
+# ── the repair path: zero-shot Seed-VC to the male reference, only if nothing passed ─────
+if WINNER is None:
+    repairable = [r for r in gate_log
+                  if r.get("word_accuracy", 0) >= 0.80 and (r.get("register") or {}).get("register") != "male"]
+    if repairable:
+        best = max(repairable, key=lambda r: r["word_accuracy"])
+        print(f"\nSVC REPAIR: converting seed {best['seed']}'s vocal to the male reference", flush=True)
+        # Seed-VC in its OWN package tree (pip --target + PYTHONPATH): its requirements broke the
+        # shared transformers once; venv is unavailable (Kaggle's ensurepip is broken).
+        sh("git clone -q https://github.com/Plachtaa/seed-vc /tmp/seedvc")
+        sh("pip install -q --target /tmp/svcdeps -r /tmp/seedvc/requirements.txt 2>&1 | tail -2")
+        if PASCAL:
+            sh("pip install -q --target /tmp/svcdeps --upgrade --force-reinstall "
+               "torch==2.7.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu126 2>&1 | tail -1")
+        # the PyPI 'typing'/'dataclasses' backports shadow the stdlib; the pyOpenSSL/cryptography
+        # pair must come from ONE tree — evict them from the overlay (each was a dead run once)
+        sh("rm -f /tmp/svcdeps/typing.py /tmp/svcdeps/dataclasses.py && "
+           "rm -rf /tmp/svcdeps/typing-*.dist-info /tmp/svcdeps/dataclasses-*.dist-info "
+           "/tmp/svcdeps/typing /tmp/svcdeps/dataclasses /tmp/svcdeps/OpenSSL /tmp/svcdeps/pyOpenSSL* "
+           "/tmp/svcdeps/pyopenssl* /tmp/svcdeps/cryptography /tmp/svcdeps/cryptography-*")
+        rc0 = sh("PYTHONPATH=/tmp/svcdeps python -c 'import typing, dataclasses, numpy, torch, "
+                 "OpenSSL, yaml, librosa, soundfile, transformers; "
+                 "print(\"svcdeps tree clean, torch\", torch.__version__)'")
+        cand = OUT / f"cand{best['seed']}.mp3"
+        stem = _vocal_stem(str(cand))
+        import soundfile as sf
+        acc_wav = str(Path(stem).parent / "acc.wav")
+        sh(f"ffmpeg -v error -i '{cand}' -ar 44100 -ac 2 /tmp/_mix.wav -y", quiet=True)
+        mix, sr_ = sf.read("/tmp/_mix.wav"); voc, _ = sf.read(stem)
+        n = min(len(mix), len(voc)); sf.write(acc_wav, mix[:n] - voc[:n], sr_)
+        conv_dir = "/tmp/svc_out"
+        rc = 1 if rc0 else sh(f"cd /tmp/seedvc && PYTHONPATH=/tmp/svcdeps python inference.py --source '{stem}' "
+                              f"--target '{MALE_REF}' --output {conv_dir} "
+                              f"--diffusion-steps 50 --length-adjust 1.0 --inference-cfg-rate 0.7 "
+                              f"--f0-condition True --auto-f0-adjust True > /tmp/svc.log 2>&1")
+        conv = sorted(Path(conv_dir).glob("*.wav"), key=lambda q: q.stat().st_mtime)
+        if rc == 0 and conv:
+            fixed = OUT / f"cand{best['seed']}_svc.mp3"
+            sh(f"ffmpeg -v error -i '{conv[-1]}' -i '{acc_wav}' "
+               f"-filter_complex '[0:a][1:a]amix=inputs=2:duration=shortest:normalize=0' "
+               f"-codec:a libmp3lame -b:a 320k '{fixed}' -y", quiet=True)
+            stem2 = _vocal_stem(str(fixed))
+            ok2, reg2 = register_gate(fixed)
+            acc2 = word_accuracy(fixed, LYRICS, stem=stem2)
+            row2 = {"seed": best["seed"], "svc_repaired": True, "register": reg2,
+                    "word_accuracy": round(acc2, 3),
+                    "verdict": "ACCEPTED post-SVC" if (ok2 and acc2 >= 0.75) else
+                               f"REJECTED post-SVC ({reg2.get('register')} words {acc2*100:.0f}%)"}
+            gate_log.append(row2); (WORK / "gate.json").write_text(json.dumps(gate_log, indent=2))
+            print(f"post-SVC: {reg2.get('f0_hz')}Hz [{reg2.get('register')}] words {acc2*100:.1f}% "
+                  f"-> {row2['verdict']}", flush=True)
+            if ok2 and acc2 >= 0.75:
+                WINNER, WINNER_ACC, WINNER_SEED = fixed, acc2, best["seed"]
+        else:
+            print(f"SVC conversion failed (rc={rc}); log tail: "
+                  f"{Path('/tmp/svc.log').read_text()[-400:] if Path('/tmp/svc.log').exists() else ''}",
+                  flush=True)
+
+assert WINNER, "no candidate passed the male+intelligible gate — refusing to master a wrong take"
+shutil.copy(WINNER, WORK / "take_raw.mp3")
+clock("song chosen")
+
+# %% [markdown]
+# ## Mastering — measured, never trusted
+#
+# Static gain to −10 LUFS, then a 4×‑oversampled true‑peak limiter at −1 dBTP, then
+# **measure the encoded mp3 and correct** (LAME overshoots; a target you never re‑measure is how a
+# record ships at −0.8 dBTP against a −1.0 promise). Never `loudnorm`'s second pass: it silently
+# discards `linear=true` when the target is unreachable and rides gain instead. Two masters are
+# made — direct, and tonally matched to the reference with matchering — and the one whose
+# **word accuracy** survives better ships; the choice is recorded.
+
+# ── master: static gain, oversampled limiter, measure-then-correct; the arm chosen by words ──
+TARGET_LUFS, TARGET_TP = -10.0, -1.0
+wav, mp3 = OUT / "STEEL.wav", OUT / "STEEL.mp3"
+
+def finish(src, wav_out, mp3_out):
+    ceiling, iters = TARGET_TP, []
+    for it in range(3):
+        a = M.loudness(src)
+        g = TARGET_LUFS - (a["lufs"] if a["lufs"] is not None else -14.0)
+        lim = 10 ** (ceiling / 20)
+        af = (f"volume={g:.2f}dB,aresample=176400,"
+              f"alimiter=limit={lim:.5f}:level=disabled,aresample=44100")
+        sh(f"ffmpeg -v error -i '{src}' -af '{af}' -ar 44100 '{wav_out}' -y", quiet=True)
+        sh(f"ffmpeg -v error -i '{wav_out}' -codec:a libmp3lame -b:a 320k '{mp3_out}' -y", quiet=True)
+        got = M.loudness(mp3_out)
+        iters.append({"ceiling_db": round(ceiling, 2), **{k: got.get(k) for k in
+                      ("lufs", "lra_lu", "true_peak_dbtp", "peak_dbfs", "clipped")}})
+        tp = got.get("true_peak_dbtp")
+        if tp is None or tp <= TARGET_TP + 0.05:
+            break
+        ceiling -= (tp - TARGET_TP) + 0.1
+    return iters
+
+MATCH_IN = None
+try:
+    import matchering as mg
+    sh(f"ffmpeg -v error -i '{WINNER}' -ar 44100 /tmp/_target.wav -y", quiet=True)
+    sh(f"ffmpeg -v error -i '{MALE_REF}' -ar 44100 /tmp/_ref.wav -y", quiet=True)
+    mg.process(target="/tmp/_target.wav", reference="/tmp/_ref.wav",
+               results=[mg.Result("/tmp/_matched.wav", "FLOAT", use_limiter=False, normalize=False)])
+    MATCH_IN = "/tmp/_matched.wav"
+except Exception as e:
+    print(f"matchering unavailable ({str(e)[:80]}) — direct master only", flush=True)
+
+arms, master_iters = {}, {}
+master_iters["direct"] = finish(str(WINNER), str(OUT / "_direct.wav"), str(OUT / "_direct.mp3"))
+arms["direct"] = {"wav": str(OUT / "_direct.wav"), "mp3": str(OUT / "_direct.mp3")}
+if MATCH_IN:
+    master_iters["matched"] = finish(MATCH_IN, str(OUT / "_matched.wav"), str(OUT / "_matched.mp3"))
+    arms["matched"] = {"wav": str(OUT / "_matched.wav"), "mp3": str(OUT / "_matched.mp3")}
+scores = {}
+for name, files in arms.items():
+    st = _vocal_stem(files["mp3"])
+    scores[name] = {"words": round(word_accuracy(files["mp3"], LYRICS, stem=st), 3)}
+    print(f"master arm {name}: words {scores[name]['words']*100:.1f}%", flush=True)
+best_arm = max(arms, key=lambda k: scores[k]["words"])
+print(f"master choice by measurement: {best_arm}", flush=True)
+shutil.copy(arms[best_arm]["wav"], wav); shutil.copy(arms[best_arm]["mp3"], mp3)
+(WORK / "master.json").write_text(json.dumps({"arm_chosen": best_arm, "arm_scores": scores,
+                                              "iterations": master_iters}, indent=2))
+for f in ("_direct.wav", "_direct.mp3", "_matched.wav", "_matched.mp3"):
+    (OUT / f).unlink(missing_ok=True)
+clock("mastered")
 
 # ── the cover video: the loop under the whole song ───────────────────────────────────────
 sh(f"ffmpeg -v error -stream_loop -1 -i '{OUT}/STEEL_cover_loop_raw.mp4' -i '{wav}' "
