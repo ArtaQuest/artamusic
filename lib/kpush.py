@@ -212,7 +212,8 @@ def push_verified(slug, title, py, public=True, sources=(), tries=6, allow_viola
                 content_ok = _ast.dump(_ast.parse(pushed)) == _ast.dump(_ast.parse(src_local))
             except SyntaxError:
                 content_ok = False
-            print(f"  kernel_sources={got} content_matches={content_ok}", flush=True)
+            print(f"  kernel_sources={got} content_matches={content_ok} "
+                  f"machine_shape={m.get('machine_shape')}", flush=True)
             if content_ok and set(got) >= set(sources):
                 print(f"  VERIFIED: {slug} — pushed source matches and mounts are present",
                       flush=True)
@@ -236,12 +237,18 @@ if __name__ == "__main__":
     if a.cmd == "push":
         f = HERE / f".push-{a.slug}"; f.mkdir(exist_ok=True)
         nb = to_ipynb(HERE / a.py, f / f"{a.slug}.ipynb")
-        (f / "kernel-metadata.json").write_text(json.dumps({
+        meta = {
             "id": f"{owner()}/{a.slug}", "title": a.title or a.slug, "code_file": Path(nb).name,
             "language": "python", "kernel_type": "notebook", "is_private": not a.public,
             "enable_gpu": not a.cpu, "enable_internet": bool(a.internet), "dataset_sources": [],
             "competition_sources": [], "kernel_sources": a.kernel_source,
-            "model_sources": []}, indent=2))
+            "model_sources": []}
+        # kagglesdk (2.2.4) documents machine_shape = NvidiaTeslaT4 | NvidiaTeslaP100 | Tpu1VmV38 —
+        # a spelling the eleven-probe note above never tried. Opt-in only, via AQ_KAGGLE_SHAPE, so
+        # every existing caller keeps today's behaviour; the readback prints what Kaggle kept.
+        if os.environ.get("AQ_KAGGLE_SHAPE"):
+            meta["machine_shape"] = os.environ["AQ_KAGGLE_SHAPE"]
+        (f / "kernel-metadata.json").write_text(json.dumps(meta, indent=2))
         r = call(api().kernels_push, str(f), timeout=None, acc=None)
         print("error:", getattr(r, "error", None), "| url:", getattr(r, "url", None))
     elif a.cmd == "status":
