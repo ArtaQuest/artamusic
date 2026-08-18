@@ -234,6 +234,12 @@ The last hand has fallen still.
 The spark the flame once told,
 I kept — and always will."""
 
+# The antiphon as BACKING VOCALS. ACE-Step's lyric convention puts backing/choir parts in
+# (parentheses); marking every "Cut!" that way tells the model the choir shouts the stroke and the
+# lead sings the line — the words the gate measures. Off = the choir is free to sing over the lead.
+ANTIPHON_AS_BACKING = False
+if ANTIPHON_AS_BACKING:
+    LYRICS = re.sub(r"^Cut! ", "(Cut!) ", LYRICS, flags=re.M)
 (OUT / "STEEL_lyrics.txt").write_text(LYRICS + "\n")
 craft = LP.measure(LYRICS)
 craft_report = {k: (round(v, 2) if isinstance(v, float) else v) for k, v in craft.items()
