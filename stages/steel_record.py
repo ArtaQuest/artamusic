@@ -32,6 +32,7 @@ import gc, glob, hashlib, json, os, random, re, shutil, subprocess, sys, time
 from pathlib import Path
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"      # torch >= 2.10 spelling
 TMP = Path("/tmp/aq"); TMP.mkdir(parents=True, exist_ok=True)
 REPO = TMP / "ACE-Step-1.5"; CKPT = TMP / "checkpoints"
 WORK = Path("/kaggle/working"); OUT = WORK / "out"; OUT.mkdir(parents=True, exist_ok=True)
@@ -373,6 +374,35 @@ NEW = """            elif resolved_device == "cuda":
 assert OLD in src, "ACE-Step changed under its pin — impossible unless the checkout failed"
 orch.write_text(src.replace(OLD, NEW, 1))
 
+def render_conf(name, seed, strength, rung, steps, duration):
+    return {"project_root": str(REPO), "config_path": rung["model"], "checkpoint_dir": str(CKPT),
+            "save_dir": str(TMP / f"out_{name}"), "audio_format": "flac", "device": "cuda",
+            "offload_to_cpu": rung["offload_to_cpu"], "offload_dit_to_cpu": rung["offload_dit_to_cpu"],
+            "task_type": "text2music", "reference_audio": MALE_REF, "audio_cover_strength": strength,
+            "caption": CAPTION, "lyrics": LYRICS, "instrumental": False,
+            "bpm": BPM, "keyscale": KEYSCALE, "timesignature": "4/4", "vocal_language": "en",
+            "duration": duration, "inference_steps": steps, "guidance_scale": 7.5,
+            "seed": seed, "infer_method": "ode",
+            "thinking": False, "use_cot_metas": False, "use_cot_caption": False,
+            "use_cot_lyrics": False, "use_cot_language": False,
+            "batch_size": 1, "use_random_seed": False, "seeds": [seed]}
+
+def cli_render(name, conf_dict, dtype):
+    """One render through ACE-Step's own CLI in its own process (the GPU is clean afterwards).
+    Whole output to a file, no pipes: the line's rc is then genuinely the CLI's."""
+    conf = TMP / f"{name}.toml"; conf.write_text(toml.dumps(conf_dict))
+    rc = sh(f"cd {REPO} && AQ_FORCE_DTYPE={dtype} PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True "
+            f"PYTORCH_ALLOC_CONF=expandable_segments:True ACESTEP_GENERATION_TIMEOUT=2400 "
+            f"python cli.py -c {conf} --backend pt --log-level INFO > /tmp/cli_{name}.txt 2>&1", quiet=True)
+    found = sorted(Path(TMP / f"out_{name}").rglob("*.flac")) + sorted(Path(TMP / f"out_{name}").rglob("*.wav"))
+    tail = Path(f"/tmp/cli_{name}.txt").read_text()[-900:] if Path(f"/tmp/cli_{name}.txt").exists() else ""
+    return rc, found, tail
+
+# A rung is not held because the model LOADED — it is held because it RENDERED. The first run on a
+# T4 pair loaded the resident rung at 12.1 GB and then every take OOM'd inside the CLI on a 1.2 GB
+# attention buffer (rc 0, no file: ACE-Step suppresses rather than crashes). So each rung is probed
+# with a FULL-LENGTH render at 2 steps — attention buffers scale with the sequence, not the steps —
+# and only a rung that produces audio is kept.
 chosen = None
 for name, model, dtype, oc, od in LADDER:
     torch.cuda.empty_cache(); torch.cuda.reset_peak_memory_stats()
@@ -383,14 +413,20 @@ for name, model, dtype, oc, od in LADDER:
         h.initialize_service(project_root=str(REPO), config_path=model, device="cuda",
                              offload_to_cpu=oc, offload_dit_to_cpu=od)
         peak = torch.cuda.max_memory_allocated() / 2**30
-        print(f"RUNG HELD: {name} — {model} @ {dtype}, peak {peak:.2f} GB in {time.time()-t0:.0f}s",
-              flush=True)
-        chosen = dict(rung=name, model=model, dtype=dtype, offload_to_cpu=oc,
-                      offload_dit_to_cpu=od, peak_gb=round(peak, 2))
-        del h; gc.collect(); torch.cuda.empty_cache(); break
+        del h; gc.collect(); torch.cuda.empty_cache()
     except Exception as e:
-        print(f"rung {name} failed: {type(e).__name__}: {str(e)[:100]}", flush=True)
-        torch.cuda.empty_cache()
+        print(f"rung {name}: load failed — {type(e).__name__}: {str(e)[:100]}", flush=True)
+        torch.cuda.empty_cache(); continue
+    rung = dict(rung=name, model=model, dtype=dtype, offload_to_cpu=oc, offload_dit_to_cpu=od,
+                peak_gb=round(peak, 2))
+    rc, found, tail = cli_render(f"probe_{name}", render_conf(f"probe_{name}", SEED, 0.35, rung, 2, DURATION), dtype)
+    if found:
+        rung["probe_seconds"] = round(time.time() - t0, 1)
+        print(f"RUNG HELD: {name} — {model} @ {dtype}, load peak {peak:.2f} GB, full-length probe "
+              f"rendered in {time.time()-t0:.0f}s", flush=True)
+        chosen = rung; break
+    print(f"rung {name}: loaded ({peak:.2f} GB) but the full-length probe produced no audio (rc={rc}):\n"
+          f"{tail[-400:]}", flush=True)
 assert chosen, "no rung held"
 (WORK / "rung.json").write_text(json.dumps({**chosen, "pins": {k: v for k, v in PINS.items()
                                                                if isinstance(v, str)},
@@ -402,33 +438,12 @@ CANDIDATES = [(6001, 0.35), (6002, 0.35), (6003, 0.35), (6004, 0.35)]
 gate_log, passers = [], []
 for seed, strength in CANDIDATES:
     name = f"cand{seed}"
-    conf = TMP / f"{name}.toml"
-    conf.write_text(toml.dumps({
-        "project_root": str(REPO), "config_path": chosen["model"], "checkpoint_dir": str(CKPT),
-        "save_dir": str(TMP / f"out_{name}"), "audio_format": "flac", "device": "cuda",
-        "offload_to_cpu": chosen["offload_to_cpu"],
-        "offload_dit_to_cpu": chosen["offload_dit_to_cpu"],
-        "task_type": "text2music", "reference_audio": MALE_REF,
-        "audio_cover_strength": strength,
-        "caption": CAPTION, "lyrics": LYRICS, "instrumental": False,
-        "bpm": BPM, "keyscale": KEYSCALE, "timesignature": "4/4", "vocal_language": "en",
-        "duration": DURATION, "inference_steps": 80, "guidance_scale": 7.5,
-        "seed": seed, "infer_method": "ode",
-        "thinking": False, "use_cot_metas": False, "use_cot_caption": False,
-        "use_cot_lyrics": False, "use_cot_language": False,
-        "batch_size": 1, "use_random_seed": False, "seeds": [seed]}))
     t0 = time.time()
-    # whole output to a file, no pipes: the line's rc is then genuinely the CLI's
-    rc = sh(f"cd {REPO} && AQ_FORCE_DTYPE={chosen['dtype']} "
-            f"PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True ACESTEP_GENERATION_TIMEOUT=2400 "
-            f"python cli.py -c {conf} --backend pt --log-level INFO > /tmp/cli_{name}.txt 2>&1",
-            quiet=True)
-    found = sorted(Path(TMP / f"out_{name}").rglob("*.flac")) + \
-            sorted(Path(TMP / f"out_{name}").rglob("*.wav"))
+    rc, found, tail = cli_render(name, render_conf(name, seed, strength, chosen, 80, DURATION), chosen["dtype"])
     row = {"seed": seed, "seconds": round(time.time()-t0, 1), "steps": 80,
-           "cover_strength": strength, "model": chosen["model"], "dtype": chosen["dtype"]}
+           "cover_strength": strength, "model": chosen["model"], "dtype": chosen["dtype"],
+           "rung": chosen["rung"]}
     if not found:
-        tail = Path(f"/tmp/cli_{name}.txt").read_text()[-800:] if Path(f"/tmp/cli_{name}.txt").exists() else ""
         row["verdict"] = f"no audio (rc={rc})"; row["cli_tail"] = tail
         gate_log.append(row); (WORK / "gate.json").write_text(json.dumps(gate_log, indent=2))
         print(f"{name}: no audio rc={rc}\n{tail[-400:]}", flush=True); continue
