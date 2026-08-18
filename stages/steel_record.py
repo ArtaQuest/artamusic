@@ -68,6 +68,26 @@ def sh(c, quiet=False):
 def clock(tag):
     print(f"  ⏱ {tag} · t+{(time.time()-T_START)/60:.1f} min", flush=True)
 
+def release(tag):
+    """Give memory BACK. Freed CPU tensors stay in the parent's heap unless glibc is told to trim, and
+    that retained heap is invisible to gc but very visible to the next subprocess: a run died with
+    'Kernel died' when ACE-Step loaded after Z-Image and both Wan experts had passed through host RAM."""
+    gc.collect()
+    try:
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+    r = subprocess.run("free -m | awk 'NR==2{print $3\"/\"$2\" MB used\"}'", shell=True, text=True,
+                       capture_output=True).stdout.strip()
+    g = subprocess.run("nvidia-smi --query-gpu=memory.used --format=csv,noheader", shell=True, text=True,
+                       capture_output=True).stdout.strip().replace("\n", " | ")
+    print(f"  [release {tag}] host {r} · gpu {g}", flush=True)
+
 smi = subprocess.run("nvidia-smi --query-gpu=name,compute_cap,memory.total --format=csv,noheader",
                      shell=True, text=True, capture_output=True).stdout.strip()
 print("GPU:", smi, flush=True)
@@ -314,7 +334,7 @@ pick = next((c for c in stills if c["seed"] == HUMAN_PICK), scorer_pick)
 shutil.copy(OUT / pick["file"], OUT / "cover.png")
 sh(f"ffmpeg -v error -i '{OUT}/cover.png' -vf scale=3000:3000:flags=lanczos '{OUT}/cover_3000.png' -y", quiet=True)
 print("cover still:", pick, "(scorer preferred", scorer_pick["seed"], ")", flush=True)
-del img_pipe; gc.collect(); torch.cuda.empty_cache()
+del img_pipe; release("after still")
 clock("still chosen")
 
 # %% [markdown]
@@ -531,7 +551,7 @@ for size in (640, 576, 480):
     if loop_rec:
         break
 assert loop_rec, "no loop was produced at any size"
-del wan_pipe; gc.collect(); torch.cuda.empty_cache()
+del wan_pipe, PE, NE; release("after loop")
 clock("loop delivered")
 
 # %% [markdown]
@@ -623,10 +643,9 @@ clock("instruments proven")
 # Seed‑VC and gated again — a deterministic repair rather than another roll of the dice.
 # The whole gate log is published beside the song.
 
-# ── the 4.6B model: a ladder of ways to hold it on the card ─────────────────────────────
+# ── the 4.6B model: a ladder of ways to hold it on the card, each rung proven by a render ─
 sys.path.insert(0, str(REPO))
 import toml
-from acestep.handler import AceStepHandler
 
 LADDER = ([("xl-resident", PINS["song_model"], "bfloat16", False, False),
            ("xl-offload",  PINS["song_model"], "bfloat16", True,  False),
@@ -654,6 +673,8 @@ NEW = """            elif resolved_device == "cuda":
 assert OLD in src, "ACE-Step changed under its pin — impossible unless the checkout failed"
 orch.write_text(src.replace(OLD, NEW, 1))
 
+release("before the song")
+
 def render_conf(name, seed, strength, rung, steps, duration):
     return {"project_root": str(REPO), "config_path": rung["model"], "checkpoint_dir": str(CKPT),
             "save_dir": str(TMP / f"out_{name}"), "audio_format": "flac", "device": "cuda",
@@ -678,34 +699,23 @@ def cli_render(name, conf_dict, dtype):
     tail = Path(f"/tmp/cli_{name}.txt").read_text()[-900:] if Path(f"/tmp/cli_{name}.txt").exists() else ""
     return rc, found, tail
 
-# A rung is not held because the model LOADED — it is held because it RENDERED. The first run on a
-# T4 pair loaded the resident rung at 12.1 GB and then every take OOM'd inside the CLI on a 1.2 GB
-# attention buffer (rc 0, no file: ACE-Step suppresses rather than crashes). So each rung is probed
-# with a FULL-LENGTH render at 2 steps — attention buffers scale with the sequence, not the steps —
-# and only a rung that produces audio is kept.
+# A rung is held because it RENDERS, not because it loads. Every render happens in ACE-Step's own
+# CLI in a fresh process (clean GPU, clean RAM), so each rung is probed with a FULL-LENGTH render at
+# 2 steps — attention buffers scale with the sequence, not the steps — and only a rung that produces
+# audio is kept. The parent notebook never loads the 4.6B model itself: on a T4 the resident rung
+# loaded at 12.1 GB and then every take OOM'd inside the CLI, and after the cover stages a parent
+# that had held the model once was what the OOM killer took.
 chosen = None
 for name, model, dtype, oc, od in LADDER:
-    torch.cuda.empty_cache(); torch.cuda.reset_peak_memory_stats()
-    os.environ["AQ_FORCE_DTYPE"] = dtype
     t0 = time.time()
-    try:
-        h = AceStepHandler()
-        h.initialize_service(project_root=str(REPO), config_path=model, device="cuda",
-                             offload_to_cpu=oc, offload_dit_to_cpu=od)
-        peak = torch.cuda.max_memory_allocated() / 2**30
-        del h; gc.collect(); torch.cuda.empty_cache()
-    except Exception as e:
-        print(f"rung {name}: load failed — {type(e).__name__}: {str(e)[:100]}", flush=True)
-        torch.cuda.empty_cache(); continue
-    rung = dict(rung=name, model=model, dtype=dtype, offload_to_cpu=oc, offload_dit_to_cpu=od,
-                peak_gb=round(peak, 2))
+    rung = dict(rung=name, model=model, dtype=dtype, offload_to_cpu=oc, offload_dit_to_cpu=od)
     rc, found, tail = cli_render(f"probe_{name}", render_conf(f"probe_{name}", SEED, 0.35, rung, 2, DURATION), dtype)
     if found:
         rung["probe_seconds"] = round(time.time() - t0, 1)
-        print(f"RUNG HELD: {name} — {model} @ {dtype}, load peak {peak:.2f} GB, full-length probe "
-              f"rendered in {time.time()-t0:.0f}s", flush=True)
+        print(f"RUNG HELD: {name} — {model} @ {dtype}: full-length probe rendered in {time.time()-t0:.0f}s",
+              flush=True)
         chosen = rung; break
-    print(f"rung {name}: loaded ({peak:.2f} GB) but the full-length probe produced no audio (rc={rc}):\n"
+    print(f"rung {name}: the full-length probe produced no audio (rc={rc}) in {time.time()-t0:.0f}s:\n"
           f"{tail[-400:]}", flush=True)
 assert chosen, "no rung held"
 (WORK / "rung.json").write_text(json.dumps({**chosen, "pins": {k: v for k, v in PINS.items()
