@@ -110,6 +110,9 @@ PE, n_pos = embed(PROMPT); NE, n_neg = embed(NEG)
 print(f"embeddings {tuple(PE.shape)} ({n_pos} / {n_neg} tokens) in {time.time()-t0:.1f}s · "
       f"finite={bool(torch.isfinite(PE).all())}", flush=True)
 assert torch.isfinite(PE).all() and torch.isfinite(NE).all(), "text embeddings not finite"
+# The pipelines cast provided embeddings to the transformer's dtype but never MOVE them: a CPU
+# tensor here dies at the first addmm ('cuda:0 and cpu'). Park them on the card now.
+PE, NE = PE.to("cuda"), NE.to("cuda")
 del te; gc.collect(); torch.cuda.empty_cache(); torch.cuda.reset_peak_memory_stats()
 vram("encoder freed")
 
