@@ -1,0 +1,8 @@
+{
+ "python": "3.12.13",
+ "platform": "Linux-6.12.90+-x86_64-with-glibc2.35",
+ "glibc": "2.35",
+ "pip": "pip 24.1.2 from /usr/local/lib/python3.12/dist-packages/pip (python 3.12)",
+ "wheels": 96,
+ "lock_sha256": "7a3c247b313e3592bdde5be1200eabde9e9e401a11c787053081590772334f65"
+}
