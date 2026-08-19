@@ -93,7 +93,11 @@ def release(tag):
                        capture_output=True).stdout.strip()
     g = subprocess.run("nvidia-smi --query-gpu=memory.used --format=csv,noheader", shell=True, text=True,
                        capture_output=True).stdout.strip().replace("\n", " | ")
-    print(f"  [release {tag}] host {r} · gpu {g}", flush=True)
+    # DISK, not just memory: this container has a writable quota of its own, and three runs were
+    # killed with no log and no outputs after the third model's weights landed in the same cache.
+    d = subprocess.run(f"du -sh {TMP} 2>/dev/null | cut -f1; df -h /tmp | tail -1 | awk '{{print $3\" used, \"$4\" free\"}}'",
+                       shell=True, text=True, capture_output=True).stdout.strip().replace("\n", " · ")
+    print(f"  [release {tag}] host {r} · gpu {g} · scratch {d}", flush=True)
 
 smi = subprocess.run("nvidia-smi --query-gpu=name,compute_cap,memory.total --format=csv,noheader",
                      shell=True, text=True, capture_output=True).stdout.strip()
@@ -348,6 +352,24 @@ def sh(c, quiet=False):
 def clock(tag):
     print(f"  \u23f1 {tag} \u00b7 t+{(time.time()-T_START)/60:.1f} min", flush=True)
 
+def drop_weights(*needles):
+    # Delete a finished stage's weights from the cache. The three stages want ~13, ~31 and ~20 GB
+    # of weights and Kaggle's container has a writable quota well under their sum: once the third
+    # download landed, the container was killed with no log and no outputs at all — three times,
+    # which is why those runs looked like silence. Everything is pinned by revision, so a re-run
+    # fetches the same bytes; keeping them after their stage buys nothing and costs the run.
+    hf = Path(os.environ["HF_HOME"]) / "hub"
+    freed = 0
+    for d in list(hf.glob("models--*")):
+        if any(n.lower() in d.name.lower() for n in needles):
+            sz = sum(f.stat().st_size for f in d.rglob("*") if f.is_file()) / 2**30
+            shutil.rmtree(d, ignore_errors=True)
+            freed += sz
+            print(f"  dropped {d.name} ({sz:.1f} GB)", flush=True)
+    df = subprocess.run("df -h /tmp | tail -1 | awk '{print $4\" free\"}'", shell=True, text=True,
+                        capture_output=True).stdout.strip()
+    print(f"  [drop] freed {freed:.1f} GB · /tmp {df}", flush=True)
+
 import numpy as np
 import torch
 from PIL import Image
@@ -399,6 +421,7 @@ def stage_still():
     sh(f"ffmpeg -v error -i '{OUT}/cover.png' -vf scale=3000:3000:flags=lanczos '{OUT}/cover_3000.png' -y", quiet=True)
     print("cover still:", pick, "(scorer preferred", scorer_pick["seed"], ")", flush=True)
     del img_pipe
+    drop_weights("Z-Image")
 
 
 def stage_loop():
@@ -598,6 +621,7 @@ def stage_loop():
         if loop_rec:
             break
     assert loop_rec, "no loop was produced at any size"
+    drop_weights("Wan-AI", "jayn7")
 
 
 if __name__ == "__main__":
