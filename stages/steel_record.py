@@ -44,7 +44,7 @@ T_START = time.time()
 PINS = {
     "ace_step_code": "6d467e4b5081ccb0abf1ec1bf4fdf9051a2d34b0",   # github.com/ACE-Step/ACE-Step-1.5
     "song_model": "acestep-v15-xl-sft",
-    "measure_sha": "5e9880ac0486bef21033b999a9c7bf3a4b7bf0f6",      # ArtaQuest/artamusic lib/measure.py
+    "measure_sha": "17b49399cfd6c24f4070353fc33643ae15e1331d",      # ArtaQuest/artamusic lib/measure.py
     "lyric_profile_sha": "ebee5bf324d8a6cff22ba666825a777c7dfc5c39",  # ArtaQuest/artamusic lib/lyric_profile.py
     "asr": "large-v3",
     "image": ("Tongyi-MAI/Z-Image-Turbo", "f332072aa78be7aecdf3ee76d5c247082da564a6"),
@@ -151,7 +151,9 @@ clock("environment ready")
 # instrument that measured the reference record): lines were brought into the sung 6–8 syllable
 # band (100%, from 76%), the bridge's hammer‑strokes were paired into sung lines, imperative
 # openings were raised toward the reference's one‑in‑three, and every chorus was made
-# word‑identical (near‑identical variants are what machine transcription mishears). The chant
+# word‑identical (near‑identical variants are what machine transcription mishears), and every
+# "Cut!" is marked as a backing vocal so the choir shouts the stroke while the lead sings the
+# line the gate measures. The chant
 # register stays deliberately monosyllabic (79% against a pop reference's 71%) — that number is
 # printed below, not hidden. Lyrics © ArtaQuest Foundation.
 
@@ -268,7 +270,7 @@ I kept — and always will."""
 # The antiphon as BACKING VOCALS. ACE-Step's lyric convention puts backing/choir parts in
 # (parentheses); marking every "Cut!" that way tells the model the choir shouts the stroke and the
 # lead sings the line — the words the gate measures. Off = the choir is free to sing over the lead.
-ANTIPHON_AS_BACKING = False
+ANTIPHON_AS_BACKING = True
 if ANTIPHON_AS_BACKING:
     LYRICS = re.sub(r"^Cut! ", "(Cut!) ", LYRICS, flags=re.M)
 (OUT / "STEEL_lyrics.txt").write_text(LYRICS + "\n")
@@ -754,7 +756,7 @@ clock("instruments proven")
 #
 # Captions are not a control over vocal register (one male take in fifteen, measured), so the
 # render is **style transfer**: text‑to‑music with the public KEEP THE KEY lead as `reference_audio`
-# at strength 0.35 — the words stay text‑driven while the reference biases the timbre. Six seeds
+# at strengths 0.25–0.35 — the words stay text‑driven while the reference biases the timbre. Six takes
 # are rendered at 80 ODE steps, guidance 7.5, 180 s, and **every** take is gated on the isolated
 # stem: register must measure male, word accuracy must reach 75%. Of the takes that pass, the one
 # with the **highest word accuracy** ships (ties go to the tighter pitch spread). If nothing
@@ -841,7 +843,11 @@ assert chosen, "no rung held"
 clock("song model held")
 
 # ── four takes: render every one, gate every one, keep the best passer ───────────────────
-CANDIDATES = [(6001, 0.35), (6002, 0.35), (6003, 0.35), (6004, 0.35), (6005, 0.35), (6006, 0.35)]
+# The strength knob is a MEASURED trade-off, not a preference: this pipeline's own probe read 89%
+# words at 0.20 and a male 145.9 Hz median at 0.35 — words fall as the reference's timbre takes
+# hold. Six takes sample it across two seeds instead of rolling one setting six times, and the gate
+# keeps the most intelligible take that still measures male.
+CANDIDATES = [(6001, 0.30), (6002, 0.30), (6003, 0.35), (6004, 0.35), (6005, 0.25), (6006, 0.25)]
 gate_log, passers = [], []
 for seed, strength in CANDIDATES:
     name = f"cand{seed}"
@@ -1022,9 +1028,19 @@ for f in ("_direct.wav", "_direct.mp3", "_matched.wav", "_matched.mp3"):
 clock("mastered")
 
 # ── the cover video: the loop under the whole song ───────────────────────────────────────
+# -shortest is NOT enough here: it ends at the end of the LOOP ITERATION that crosses the song's
+# end, so the file kept up to one loop of silent video (measured: 24.6 s of video under 20 s of
+# audio). The song's own duration is the length, so pass it.
+song_seconds = float(subprocess.run(
+    ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(wav)],
+    text=True, capture_output=True).stdout.strip() or DURATION)
 sh(f"ffmpeg -v error -stream_loop -1 -i '{OUT}/STEEL_cover_loop_raw.mp4' -i '{wav}' "
    f"-vf scale=1080:1080:flags=lanczos,format=yuv420p -c:v libx264 -preset slow -crf 20 "
-   f"-c:a aac -b:a 256k -shortest -movflags +faststart '{OUT}/STEEL_cover_video.mp4' -y")
+   f"-c:a aac -b:a 256k -t {song_seconds:.3f} -movflags +faststart '{OUT}/STEEL_cover_video.mp4' -y")
+_vd = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                      str(OUT / "STEEL_cover_video.mp4")], text=True, capture_output=True).stdout.strip()
+print(f"cover video: {_vd}s of video under {song_seconds:.3f}s of song", flush=True)
+assert _vd and abs(float(_vd) - song_seconds) < 0.5, "the cover video does not match the song's length"
 (OUT / "STEEL_cover_loop_raw.mp4").unlink(missing_ok=True)
 clock("cover video rendered")
 
