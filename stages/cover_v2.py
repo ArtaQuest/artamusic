@@ -223,6 +223,14 @@ def _score_and_save(imgs, model_used):
             "warm": round(float((a[..., 0] - a[..., 2]).clip(0).mean() * 255), 2),
             "dark_frac": round(float((g < 0.25).mean()), 3),
             "contrast": round(float(g.std() * 255), 2)}
+    # A BLANK IMAGE IS NOT A RESULT. Four pure-black frames were scored (contrast 0.0, dark 1.0),
+    # written, upscaled to 3000px and shipped, because the numbers were recorded and nothing was
+    # ever compared against them. Refuse here, where the evidence is.
+    dead = [n for n, c in rec["candidates"].items() if c["contrast"] < 2.0 or c["dark_frac"] > 0.995]
+    if dead:
+        raise RuntimeError(f"{len(dead)} of {len(imgs)} stills are blank ({', '.join(dead)}) — "
+                           f"contrast {[rec['candidates'][n]['contrast'] for n in dead]}. "
+                           f"This model is producing nothing; refusing to ship it.")
     pick = CFG["human_pick"] if CFG["human_pick"] in imgs else list(imgs)[0]
     rec["shipped"] = pick
     imgs[pick].save(OUT / "cover.png")
@@ -272,8 +280,14 @@ def stage_krea():
                       f"{json.dumps(d['rope_scaling'])}", flush=True)
         if changed:
             f.write_text(json.dumps(c))
+    # The repo ships tokenizer.json but not vocab.json/merges.txt, and the slow Qwen2Tokenizer that
+    # diffusers picks needs those two files: it was handed vocab_file=None. The FAST tokenizer reads
+    # tokenizer.json alone, so it is built explicitly and passed in.
+    from transformers import AutoTokenizer
+    tok = AutoTokenizer.from_pretrained(str(Path(p) / "tokenizer"), use_fast=True)
+    print(f"  tokenizer: {type(tok).__name__} (fast={getattr(tok, 'is_fast', None)})", flush=True)
     try:
-        pipe = Krea2Pipeline.from_pretrained(p, torch_dtype=torch.float16)
+        pipe = Krea2Pipeline.from_pretrained(p, tokenizer=tok, torch_dtype=torch.float16)
     except Exception:
         # The whole point of a separate process: print the REAL traceback and exit non-zero.
         # A swallowed str(e)[:200] said "'NoneType' object has no attribute 'get'" and named
@@ -310,10 +324,13 @@ def stage_zimage():
     # and that is most of the difference between a catalogue frame and a directed one.
     from diffusers import ZImagePipeline
     repo, rev = PINS["image_fallback"]
-    pipe = ZImagePipeline.from_pretrained(repo, revision=rev, torch_dtype=torch.float16)
-    # NOT resident: the 6.15B transformer is 12.3 GB in fp16 and its Qwen3-4B text encoder another
-    # 8 GB — together they do not fit a 15 GB T4, which is what OOM'd this stage on 76 MB. Model
-    # offload keeps one component on the card at a time.
+    # bfloat16, NOT float16: in fp16 this model emits PURE BLACK — it did exactly that here, four
+    # images of min 0 max 0, and the run shipped them because nothing looked. Neither Kaggle card
+    # has bf16 in hardware so it is emulated and slower, but a slow correct image beats a fast
+    # black one. The VAE stays fp32 for the same reason.
+    pipe = ZImagePipeline.from_pretrained(repo, revision=rev, torch_dtype=torch.bfloat16)
+    # NOT resident: a 12.3 GB transformer plus an 8 GB text encoder do not fit a 15 GB T4 — that is
+    # what OOM'd this stage on a 76 MB allocation. Offload keeps one component on the card.
     pipe.enable_model_cpu_offload()
     pipe.vae.to(torch.float32)
     if hasattr(pipe, "enable_vae_tiling"): pipe.enable_vae_tiling()
@@ -412,7 +429,15 @@ def stage_loop():
             a = [x.to("cuda:1") if torch.is_tensor(x) else x for x in a]
             k = {n: (v.to("cuda:1") if torch.is_tensor(v) else v) for n, v in k.items()}
             o = _f(*a, **k)
-            return o.__class__(sample=o.sample.to("cuda:0")) if hasattr(o, "sample") else o
+            # The pipeline calls the transformer with return_dict=False, so this comes back as a
+            # TUPLE. An earlier version only moved the .sample attribute and passed tuples through
+            # untouched, which left the low-noise expert's prediction on cuda:1 — the run died at
+            # the 50% mark, exactly where the second expert takes over.
+            if isinstance(o, tuple):
+                return tuple(x.to("cuda:0") if torch.is_tensor(x) else x for x in o)
+            if torch.is_tensor(o):
+                return o.to("cuda:0")
+            return o.__class__(sample=o.sample.to("cuda:0"))
         lo.forward = across
         print("  one expert per card", flush=True)
     else:
