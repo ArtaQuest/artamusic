@@ -717,8 +717,28 @@ def word_accuracy(mp3, lyric_text, stem=None):
             d[i,j] = min(d[i-1,j]+1, d[i,j-1]+1, d[i-1,j-1]+(ref[i-1]!=hyp[j-1]))
     return 1.0 - min(1.0, float(d[-1,-1])/max(1,len(ref)))
 
+def stem_energy(stem):
+    """RMS of the isolated vocal, in dBFS — the number that says whether there is a voice to measure."""
+    if not stem:
+        return None
+    try:
+        import soundfile as sf
+        a, _ = sf.read(stem, dtype="float32")
+        if a.ndim > 1:
+            a = a.mean(1)
+        r = float(np.sqrt((a.astype(np.float64) ** 2).mean()))
+        return round(20 * np.log10(max(r, 1e-9)), 1)
+    except Exception:
+        return None
+
 def register_gate(mp3):
-    reg = M.register(str(mp3))
+    # An unmeasurable take is a REJECTED take, never a dead run. YIN returns all-NaN when it finds
+    # no voiced frames, and the pinned instrument then hands numpy a [nan, nan] histogram range —
+    # which killed a run that had already spent two hours making a cover and a first take.
+    try:
+        reg = M.register(str(mp3))
+    except Exception as e:
+        return False, {"register": "unmeasurable", "error": f"{type(e).__name__}: {str(e)[:120]}"}
     return reg.get("register") == "male", reg
 
 # the male voice reference — KEEP THE KEY's lead, the cleanest male vocal this pipeline owns
@@ -837,9 +857,16 @@ for seed, strength in CANDIDATES:
     mp3 = OUT / f"{name}.mp3"
     sh(f"ffmpeg -v error -i '{max(found, key=lambda p: p.stat().st_size)}' "
        f"-codec:a libmp3lame -b:a 320k '{mp3}' -y", quiet=True)
-    stem = _vocal_stem(mp3)
-    ok_reg, reg = register_gate(mp3)
-    acc = word_accuracy(mp3, LYRICS, stem=stem)
+    try:
+        stem = _vocal_stem(mp3)
+        row["stem_dbfs"] = stem_energy(stem)
+        ok_reg, reg = register_gate(mp3)
+        acc = word_accuracy(mp3, LYRICS, stem=stem)
+    except Exception as e:                       # one take's measurement can never end the run
+        row["verdict"] = f"UNMEASURABLE ({type(e).__name__}: {str(e)[:120]})"
+        gate_log.append(row); (WORK / "gate.json").write_text(json.dumps(gate_log, indent=2))
+        print(f"{name}: {row['verdict']} · stem {row.get('stem_dbfs')} dBFS", flush=True)
+        continue
     row.update(register=reg, word_accuracy=round(acc, 3), asr_judge=_WH[1])
     ok_words = acc >= 0.75
     row["verdict"] = "PASS" if (ok_reg and ok_words) else \
@@ -847,7 +874,8 @@ for seed, strength in CANDIDATES:
     gate_log.append(row); (WORK / "gate.json").write_text(json.dumps(gate_log, indent=2))
     print(f"{name}: median={reg.get('f0_hz')}Hz [{reg.get('register')}] "
           f"spread={reg.get('spread_st')}st lead={reg.get('lead_hz')}Hz@{reg.get('lead_frac')} "
-          f"words={acc*100:.1f}% -> {row['verdict']} · {row['seconds']:.0f}s", flush=True)
+          f"stem={row.get('stem_dbfs')}dBFS words={acc*100:.1f}% -> {row['verdict']} · "
+          f"{row['seconds']:.0f}s", flush=True)
     if ok_reg and ok_words:
         passers.append((acc, -float(reg.get("spread_st") or 99), mp3, seed))
     clock(f"{name} gated")
@@ -921,7 +949,11 @@ if WINNER is None:
                   f"{Path('/tmp/svc.log').read_text()[-400:] if Path('/tmp/svc.log').exists() else ''}",
                   flush=True)
 
-assert WINNER, "no candidate passed the male+intelligible gate — refusing to master a wrong take"
+if WINNER is None:
+    print("\nGATE LOG:\n" + json.dumps([{k: v for k, v in r.items() if k != "cli_tail"} for r in gate_log],
+                                        indent=1)[:4000], flush=True)
+assert WINNER, ("no candidate passed the male+intelligible gate — refusing to master a wrong take; "
+                "verdicts: " + "; ".join(f"{r.get('seed')}:{r.get('verdict')}" for r in gate_log))
 shutil.copy(WINNER, WORK / "take_raw.mp3")
 clock("song chosen")
 
