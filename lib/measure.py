@@ -64,6 +64,18 @@ def f0_yin(x, sr, lo=70.0, hi=500.0, frame=2048, hop=512, thresh=0.15):
     return np.array(out)
 
 
+def finite_f0(f0):
+    """Keep only frames YIN actually voiced: finite AND positive.
+
+    f0_yin's parabolic refinement divides by (y0 - 2*y1 + y2). When that denominator is tiny the
+    correction blows up, so a frame can come back as +/-inf or as a NEGATIVE frequency — and
+    np.log2 of a negative is NaN, which is what detonated np.histogram three hours into a
+    publication run. The length guard below could not see it: forty NaNs are still forty frames.
+    """
+    f0 = np.asarray(f0, dtype=float)
+    return f0[np.isfinite(f0) & (f0 > 0)]
+
+
 def _row(**kw):
     """One key set for every exit path. A caller reading reg["lead_hz"] must never KeyError
     because the stem was missing — a downstream crash on the failure path is how a gate stops
@@ -100,10 +112,15 @@ def register(path, hop_div=2):
             return _row(register="no-vocal-stem")
         x, sr = load(voc, mono=True)
         f0 = f0_yin(x[::hop_div], sr // hop_div)
+    # COUNT IS NOT THE SAME AS FINITE. YIN returns a non-finite estimate for a frame it cannot
+    # voice, so a stem that is silent (or has no lead at all) arrives here as forty-plus NaNs, sails
+    # past a length check, and detonates in np.histogram with "autodetected range of [nan, nan]".
+    # That killed a publication run three hours in, after the cover and the first take were already
+    # made. An unvoiced frame is not a measurement: drop it, and judge on what is left.
+    f0 = finite_f0(f0)
     if len(f0) < 40:
         return _row(register="unknown", frames=int(len(f0)))
 
-    f0 = np.asarray(f0, dtype=float)
     med = float(np.median(f0))
     q1, q3 = (float(v) for v in np.percentile(f0, [25, 75]))
     spread_st = float(12 * np.log2(q3 / max(q1, 1e-9)))
@@ -242,6 +259,27 @@ def selftest():
         got = float(np.median(f0_yin(x, SR)))
         good = abs(got-truth) < 1.0; ok &= good
         print(f"   {truth:6.1f} -> {got:7.2f}  {'ok' if good else 'FAIL'}")
+    print("\nPITCH — frames YIN could not voice must never reach the histogram")
+    # Every value here is one f0_yin can actually emit: its parabolic step divides by a denominator
+    # that can be ~0, giving +/-inf or a NEGATIVE frequency, and log2 of a negative is NaN.
+    hostile = {"nan": np.nan, "+inf": np.inf, "-inf": -np.inf, "negative": -180.0, "zero": 0.0}
+    good_f0 = np.full(60, 150.0) + np.random.default_rng(3).normal(0, 2, 60)
+    for name, bad in hostile.items():
+        mixed = np.concatenate([good_f0, np.full(10, bad)])
+        kept = finite_f0(mixed)
+        try:
+            np.histogram(np.log2(kept), bins=48)             # the call that detonated
+            crashed = False
+        except Exception as e:
+            crashed = True
+            print(f"   {name}: {type(e).__name__}: {str(e)[:60]}")
+        good = (not crashed) and len(kept) == len(good_f0)
+        ok &= good
+        print(f"   {name:9s} 70 frames -> {len(kept):3d} kept, histogram {'ok' if not crashed else 'CRASHED'}"
+              f"  {'ok' if good else 'FAIL'}")
+    only_bad = finite_f0(np.full(60, np.nan))
+    good = len(only_bad) == 0; ok &= good
+    print(f"   all-unvoiced -> {len(only_bad)} kept (register reports 'unknown')  {'ok' if good else 'FAIL'}")
     print("\nTEMPO — click trains of known bpm (the octave trap)")
     for bpm in (90.0,100.0,128.0):
         x = np.zeros(int(SR*20))
