@@ -246,14 +246,32 @@ def stage_krea():
     p = snapshot_download(repo, revision=rev)
     for sub in ("transformer/config.json", "text_encoder/config.json"):
         f = Path(p) / sub
-        if f.exists():
-            c = json.loads(f.read_text())
-            q = c.get("quantization_config") or {}
-            if q.get("bnb_4bit_compute_dtype") == "bfloat16":
-                q["bnb_4bit_compute_dtype"] = "float16"
-                c["quantization_config"] = q
-                f.write_text(json.dumps(c))
-                print(f"  patched {sub}: compute dtype -> float16", flush=True)
+        if not f.exists():
+            continue
+        c = json.loads(f.read_text())
+        changed = False
+        q = c.get("quantization_config") or {}
+        if q.get("bnb_4bit_compute_dtype") == "bfloat16":
+            q["bnb_4bit_compute_dtype"] = "float16"
+            c["quantization_config"] = q
+            changed = True
+            print(f"  {sub}: compute dtype -> float16", flush=True)
+        # transformers RENAMED rope_scaling -> rope_parameters, and this repo was exported with the
+        # newer name while the pinned transformers still reads the old one. Qwen3VLTextRotaryEmbedding
+        # then does config.rope_scaling.get(...) on None and the whole pipeline dies loading its
+        # second component. Translate the key back — the values are the repo's own, not invented.
+        for sub_cfg in ("text_config", "vision_config"):
+            d = c.get(sub_cfg)
+            if isinstance(d, dict) and not d.get("rope_scaling") and isinstance(d.get("rope_parameters"), dict):
+                rp = dict(d["rope_parameters"])
+                if "rope_theta" in rp and not d.get("rope_theta"):
+                    d["rope_theta"] = rp["rope_theta"]
+                d["rope_scaling"] = {k: v for k, v in rp.items() if k != "rope_theta"}
+                changed = True
+                print(f"  {sub}/{sub_cfg}: rope_parameters -> rope_scaling "
+                      f"{json.dumps(d['rope_scaling'])}", flush=True)
+        if changed:
+            f.write_text(json.dumps(c))
     try:
         pipe = Krea2Pipeline.from_pretrained(p, torch_dtype=torch.float16)
     except Exception:
@@ -266,14 +284,24 @@ def stage_krea():
     pipe.vae.to(torch.float32)
     if hasattr(pipe, "enable_vae_tiling"): pipe.enable_vae_tiling()
     print("  Krea 2 Turbo ready (NF4, resident, fp16 compute)", flush=True)
-    imgs = {}
+    imgs, side = {}, 1024
     for name, brief in CFG["briefs"].items():
         t0 = time.time()
-        imgs[name] = pipe(prompt=brief, height=1024, width=1024, num_inference_steps=8,
-                          guidance_scale=0.0,
-                          generator=torch.Generator("cuda").manual_seed(SEED)).images[0]
-        print(f"  {name}: {time.time()-t0:.0f}s", flush=True)
-    _score_and_save(imgs, f"Krea-2-Turbo NF4 ({repo})")
+        for attempt in range(2):
+            try:
+                imgs[name] = pipe(prompt=brief, height=side, width=side, num_inference_steps=8,
+                                  guidance_scale=0.0,
+                                  generator=torch.Generator("cuda").manual_seed(SEED)).images[0]
+                break
+            except torch.cuda.OutOfMemoryError:
+                gc.collect(); torch.cuda.empty_cache()
+                if side == 1024:
+                    side = 896
+                    print(f"  {name}: no room at 1024 beside 11 GB of weights — 896", flush=True)
+                else:
+                    raise
+        print(f"  {name}: {time.time()-t0:.0f}s at {side}", flush=True)
+    _score_and_save(imgs, f"Krea-2-Turbo NF4 ({repo}) @{side}")
     drop("Krea")
 
 
@@ -283,7 +311,11 @@ def stage_zimage():
     from diffusers import ZImagePipeline
     repo, rev = PINS["image_fallback"]
     pipe = ZImagePipeline.from_pretrained(repo, revision=rev, torch_dtype=torch.float16)
-    pipe.to("cuda"); pipe.vae.to(torch.float32)
+    # NOT resident: the 6.15B transformer is 12.3 GB in fp16 and its Qwen3-4B text encoder another
+    # 8 GB — together they do not fit a 15 GB T4, which is what OOM'd this stage on 76 MB. Model
+    # offload keeps one component on the card at a time.
+    pipe.enable_model_cpu_offload()
+    pipe.vae.to(torch.float32)
     if hasattr(pipe, "enable_vae_tiling"): pipe.enable_vae_tiling()
     NEG = ("flat frontal studio lighting, evenly lit backdrop, stock photo staging, centred "
            "symmetrical subject, cluttered background, oversaturated, plastic, watermark, text")
