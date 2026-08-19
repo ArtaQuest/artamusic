@@ -25,8 +25,20 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 TMP = Path("/tmp/aq"); TMP.mkdir(parents=True, exist_ok=True)
 WORK = Path("/kaggle/working"); OUT = WORK / "out"; OUT.mkdir(parents=True, exist_ok=True)
-os.environ.update(HF_HOME=str(TMP / "hf"), HF_HUB_ENABLE_HF_TRANSFER="1")
+os.environ["HF_HOME"] = str(TMP / "hf")
 T_START = time.time()
+
+def want_fast_downloads():
+    """HF_HUB_ENABLE_HF_TRANSFER=1 is a REQUEST THAT CANNOT FAIL SOFTLY: huggingface_hub raises
+    ValueError on every download if the package is missing, rather than falling back to plain
+    HTTP. Asked for and absent, it killed a run at second thirty. Set it only if it is importable."""
+    try:
+        import hf_transfer  # noqa: F401
+        os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+        return True
+    except Exception:
+        os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
+        return False
 
 PINS = {
     # The image model. Krea 2 Turbo, 12.9B, in an NF4 diffusers layout that is ungated and 11.2 GB
@@ -61,11 +73,14 @@ PASCAL = 0 < CAP < 7.0
 sh("free -g | head -2; df -h /tmp | tail -1; nproc")
 
 sh("pip install -q 'diffusers==0.39.0' 'transformers>=4.51.0,<4.58.0' accelerate safetensors "
-   "sentencepiece protobuf 'gguf>=0.10.0' ftfy imageio imageio-ffmpeg bitsandbytes 2>&1 | tail -2")
+   "sentencepiece protobuf 'gguf>=0.10.0' ftfy imageio imageio-ffmpeg bitsandbytes hf_transfer "
+   "2>&1 | tail -2")
 if PASCAL:
     # sm_60 needs the cu126 torch line, and bitsandbytes' cu128 wheels drop sm60 with it
     sh("pip install -q torch==2.7.1 torchvision==0.22.1 --index-url "
        "https://download.pytorch.org/whl/cu126 2>&1 | tail -1")
+
+print("fast downloads:", want_fast_downloads(), flush=True)
 
 import numpy as np
 import torch
@@ -153,7 +168,12 @@ os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 CFG = json.load(open("/tmp/aq_cfg.json"))
 PINS, SEED = CFG["pins"], CFG["seed"]
 TMP, WORK, OUT = Path(CFG["tmp"]), Path(CFG["work"]), Path(CFG["out"])
-os.environ.update(HF_HOME=CFG["hf_home"], HF_HUB_ENABLE_HF_TRANSFER="1")
+os.environ["HF_HOME"] = CFG["hf_home"]
+try:
+    import hf_transfer  # noqa: F401       # asking for it without having it is a hard error
+    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+except Exception:
+    os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
 sys.path.insert(0, CFG["tools"])
 T0 = time.time()
 
