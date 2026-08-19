@@ -72,9 +72,14 @@ CAP = float(smi.splitlines()[0].split(",")[1]) if smi else 0.0
 PASCAL = 0 < CAP < 7.0
 sh("free -g | head -2; df -h /tmp | tail -1; nproc")
 
-sh("pip install -q 'diffusers==0.39.0' 'transformers>=4.51.0,<4.58.0' accelerate safetensors "
+# transformers is NOT pinned below 4.58 here. That ceiling exists for ACE-Step, which this
+# notebook does not use, and it was the single cause of three separate Krea 2 failures: the repo
+# was exported with transformers 5.x, whose config uses `rope_parameters` where 4.57 reads
+# `rope_scaling`, whose tokenizer_config carries `extra_special_tokens` as a LIST where 4.57
+# expects a dict, and whose tokenizer ships only tokenizer.json. Three symptoms, one version.
+sh("pip install -q 'diffusers==0.39.0' 'transformers>=5.13' accelerate safetensors "
    "sentencepiece protobuf 'gguf>=0.10.0' ftfy imageio imageio-ffmpeg bitsandbytes hf_transfer "
-   "2>&1 | tail -2")
+   "2>&1 | tail -3")
 if PASCAL:
     # sm_60 needs the cu126 torch line, and bitsandbytes' cu128 wheels drop sm60 with it
     sh("pip install -q torch==2.7.1 torchvision==0.22.1 --index-url "
@@ -268,7 +273,9 @@ def stage_krea():
         # newer name while the pinned transformers still reads the old one. Qwen3VLTextRotaryEmbedding
         # then does config.rope_scaling.get(...) on None and the whole pipeline dies loading its
         # second component. Translate the key back — the values are the repo's own, not invented.
-        for sub_cfg in ("text_config", "vision_config"):
+        import transformers as _tf
+        old_tf = int(_tf.__version__.split(".")[0]) < 5
+        for sub_cfg in ("text_config", "vision_config") if old_tf else ():
             d = c.get(sub_cfg)
             if isinstance(d, dict) and not d.get("rope_scaling") and isinstance(d.get("rope_parameters"), dict):
                 rp = dict(d["rope_parameters"])
@@ -283,11 +290,14 @@ def stage_krea():
     # The repo ships tokenizer.json but not vocab.json/merges.txt, and the slow Qwen2Tokenizer that
     # diffusers picks needs those two files: it was handed vocab_file=None. The FAST tokenizer reads
     # tokenizer.json alone, so it is built explicitly and passed in.
-    from transformers import AutoTokenizer
-    tok = AutoTokenizer.from_pretrained(str(Path(p) / "tokenizer"), use_fast=True)
-    print(f"  tokenizer: {type(tok).__name__} (fast={getattr(tok, 'is_fast', None)})", flush=True)
+    import transformers as _tf2
+    print(f"  transformers {_tf2.__version__}", flush=True)
+    kw = {}
+    if int(_tf2.__version__.split(".")[0]) < 5:
+        from transformers import AutoTokenizer     # 4.x needs vocab.json/merges.txt the repo lacks
+        kw["tokenizer"] = AutoTokenizer.from_pretrained(str(Path(p) / "tokenizer"), use_fast=True)
     try:
-        pipe = Krea2Pipeline.from_pretrained(p, tokenizer=tok, torch_dtype=torch.float16)
+        pipe = Krea2Pipeline.from_pretrained(p, torch_dtype=torch.float16, **kw)
     except Exception:
         # The whole point of a separate process: print the REAL traceback and exit non-zero.
         # A swallowed str(e)[:200] said "'NoneType' object has no attribute 'get'" and named
@@ -331,16 +341,21 @@ def stage_zimage():
     pipe = ZImagePipeline.from_pretrained(repo, revision=rev, torch_dtype=torch.bfloat16)
     # NOT resident: a 12.3 GB transformer plus an 8 GB text encoder do not fit a 15 GB T4 — that is
     # what OOM'd this stage on a 76 MB allocation. Offload keeps one component on the card.
-    pipe.enable_model_cpu_offload()
+    # SEQUENTIAL, not model, offload: bf16 has no hardware path on either Kaggle card, so torch
+    # runs those matmuls in fp32 and the activations are twice what they look — model offload still
+    # OOM'd on a 3.75 GB allocation. Sequential streams one submodule at a time, which is the
+    # configuration that actually rendered four stills on this hardware before.
+    pipe.enable_sequential_cpu_offload()
     pipe.vae.to(torch.float32)
+    if hasattr(pipe, "enable_attention_slicing"): pipe.enable_attention_slicing("auto")
     if hasattr(pipe, "enable_vae_tiling"): pipe.enable_vae_tiling()
     NEG = ("flat frontal studio lighting, evenly lit backdrop, stock photo staging, centred "
            "symmetrical subject, cluttered background, oversaturated, plastic, watermark, text")
-    print("  Z-Image base ready (fp16 resident)", flush=True)
+    print("  Z-Image base ready (bf16, sequential offload, attention slicing)", flush=True)
     imgs = {}
     for name, brief in CFG["briefs"].items():
         t0 = time.time()
-        imgs[name] = pipe(prompt=brief, negative_prompt=NEG, height=1024, width=1024,
+        imgs[name] = pipe(prompt=brief, negative_prompt=NEG, height=896, width=896,
                           num_inference_steps=32, guidance_scale=4.0,
                           generator=torch.Generator("cuda").manual_seed(SEED)).images[0]
         print(f"  {name}: {time.time()-t0:.0f}s", flush=True)
