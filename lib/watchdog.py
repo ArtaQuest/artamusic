@@ -33,13 +33,22 @@ def used():
     return float(q.get("timeUsed", "0s")[:-1]), float(q.get("timeReserved", "0s")[:-1])
 
 TERMINAL = ("complete", "error", "cancel")
-last_used, last_move, state, stalled = None, time.time(), None, False
+last_used, last_move, state, stalled, misses = None, time.time(), None, False, 0
+FAIL_QUIET = 3          # consecutive failed probes (~6 min) before it is worth saying
 print(f"{time.strftime('%H:%M')} watching {REF} on {ACCT} (stall alarm {STALL_MIN:.0f} min)", flush=True)
 while True:
     try:
         st = status(); u, res = used()
+        if misses >= FAIL_QUIET:
+            print(f"{time.strftime('%H:%M')} {REF}: probe recovered after {misses} failures", flush=True)
+        misses = 0
     except Exception as e:
-        print(f"{time.strftime('%H:%M')} {REF}: probe failed ({type(e).__name__}) — retrying", flush=True)
+        # One blip is weather, not news: kaggle.com and api.kaggle.com both dropped for two minutes
+        # and woke the operator for nothing. Report only a persistent outage, and never stop trying.
+        misses += 1
+        if misses == FAIL_QUIET:
+            print(f"{time.strftime('%H:%M')} {REF}: probe failing for {FAIL_QUIET * 2} min "
+                  f"({type(e).__name__}) — still retrying", flush=True)
         time.sleep(120); continue
     now = time.time()
     if last_used is None or u > last_used + 1:
