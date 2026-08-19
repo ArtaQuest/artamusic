@@ -68,6 +68,13 @@ def sh(c, quiet=False):
 def clock(tag):
     print(f"  ⏱ {tag} · t+{(time.time()-T_START)/60:.1f} min", flush=True)
 
+def sha_of(f, n=64):
+    h = hashlib.sha256()
+    with open(f, "rb") as fh:
+        for c in iter(lambda: fh.read(1 << 22), b""):
+            h.update(c)
+    return h.hexdigest()[:n]
+
 def release(tag):
     """Give memory BACK. Freed CPU tensors stay in the parent's heap unless glibc is told to trim, and
     that retained heap is invisible to gc but very visible to the next subprocess: a run died with
@@ -293,50 +300,6 @@ BPM, KEYSCALE = 100, "F minor"   # match the conditioning reference; a key fight
 # **6270** — the blade sweeping the frame with the hearth behind — and this run records both and
 # ships the eye's choice. Arguing with a scorer is allowed; hiding the argument is not.
 
-# ── the still ────────────────────────────────────────────────────────────────────────────
-from PIL import Image
-from huggingface_hub import hf_hub_download, snapshot_download
-from diffusers import ZImagePipeline
-
-ART_PROMPT = (
-    "A single forged steel sword lying across a bed of white-hot coals inside a dark blacksmith's "
-    "forge at night. The blade is freshly quenched, its edge still glowing orange along a "
-    "hardening line, the polished steel reflecting the fire. Fine sparks rise through the smoky "
-    "air. Heavy stone anvil and soot-blackened brick behind, deep shadow, one warm light source "
-    "from the coals below. Shot on a 85mm lens at f/2, shallow depth of field, volumetric haze, "
-    "photorealistic, cinematic colour grade, ultra sharp detail on the blade, album cover.")
-ART_NEG = ("cartoon, illustration, painting, cgi render, plastic, blurry, low detail, watermark, "
-           "text, signature, extra swords, hands, people, oversaturated, orange filter")
-IMAGE_REV = PINS["image"][1]
-img_pipe = ZImagePipeline.from_pretrained(PINS["image"][0], revision=IMAGE_REV, torch_dtype=torch.bfloat16)
-img_pipe.enable_sequential_cpu_offload()
-if hasattr(img_pipe, "vae"):
-    img_pipe.vae.enable_tiling()
-STILL_SEEDS, HUMAN_PICK = [SEED, 5150, 6270, 7380], 6270
-t0 = time.time(); stills = []
-for seed in STILL_SEEDS:
-    im = img_pipe(prompt=ART_PROMPT, negative_prompt=ART_NEG, width=896, height=896,
-                  num_inference_steps=9, guidance_scale=0.0,
-                  generator=torch.Generator(device="cuda").manual_seed(seed)).images[0]
-    p = OUT / f"still_{seed}.png"; im.save(p)
-    a = np.asarray(im.convert("RGB"), dtype=np.float32) / 255
-    g = a.mean(-1); gy, gx = np.gradient(g)
-    stills.append({"seed": seed, "file": p.name,
-                   "detail": round(float(np.sqrt(gx**2 + gy**2).mean() * 255), 2),
-                   "warm": round(float((a[..., 0] - a[..., 2]).clip(0).mean() * 255), 2),
-                   "dark_frac": round(float((g < 0.25).mean()), 3)})
-    print(f"  still seed {seed}: {stills[-1]}", flush=True)
-print(f"{len(stills)} stills in {time.time()-t0:.0f}s", flush=True)
-scorer_pick = max(stills, key=lambda c: c["detail"] * (1 + c["warm"] / 40) * (0.5 + c["dark_frac"]))
-pick = next((c for c in stills if c["seed"] == HUMAN_PICK), scorer_pick)
-(WORK / "stills.json").write_text(json.dumps({"candidates": stills, "scorer_pick": scorer_pick,
-    "human_pick": HUMAN_PICK, "shipped": pick, "image_revision": IMAGE_REV}, indent=2))
-shutil.copy(OUT / pick["file"], OUT / "cover.png")
-sh(f"ffmpeg -v error -i '{OUT}/cover.png' -vf scale=3000:3000:flags=lanczos '{OUT}/cover_3000.png' -y", quiet=True)
-print("cover still:", pick, "(scorer preferred", scorer_pick["seed"], ")", flush=True)
-del img_pipe; release("after still")
-clock("still chosen")
-
 # %% [markdown]
 # ## The cover loop — Wan2.2‑I2V‑A14B, first frame = last frame = the still
 #
@@ -355,204 +318,314 @@ clock("still chosen")
 # on any non‑finite latent. With two GPUs each expert lives on its own card; with one, they
 # swap through host RAM and the decode is done explicitly after both are parked.
 
-# ── the loop ─────────────────────────────────────────────────────────────────────────────
-import ftfy, html
-from transformers import AutoTokenizer, UMT5EncoderModel
-from diffusers import (AutoencoderKLWan, FlowMatchEulerDiscreteScheduler, GGUFQuantizationConfig,
-                       WanImageToVideoPipeline, WanTransformer3DModel)
+# ── the cover stages, each in its OWN PROCESS ────────────────────────────────────────────
+# Four runs died here and the mechanism was the same every time: this notebook's process keeps the
+# host memory that Z-Image and the two Wan experts passed through — freed tensors sit in the heap,
+# invisible to gc — and when ACE-Step's 4.6B model then loads, the OOM killer takes the notebook
+# kernel. Twice it took it so hard that Kaggle saved neither log nor outputs. Trimming the heap was
+# not enough. So every heavy stage now runs as its own process, exactly as the song stage already
+# runs through ACE-Step's CLI: the notebook writes the stage script below, runs it, and reads back
+# its JSON. One notebook, one Run All — and no model is ever loaded in THIS process.
+STAGE_SRC = r"""#!/usr/bin/env python3
+# Written by the notebook, run as its OWN PROCESS — see the note in the notebook cell below.
+import gc, glob, hashlib, json, os, re, shutil, subprocess, sys, time
+from pathlib import Path
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
+CFG = json.load(open("/tmp/aq_cfg.json"))
+PINS = CFG["pins"]; SEED = CFG["seed"]
+TMP = Path(CFG["tmp"]); WORK = Path(CFG["work"]); OUT = Path(CFG["out"])
+os.environ.update(HF_HOME=CFG["hf_home"], HF_HUB_ENABLE_HF_TRANSFER="1")
+T_START = time.time()
 
-FPS, NF, STEPS, XF = 16, 81, 4, 6
-WAN_BASE, WAN_BASE_REV = PINS["wan_base"]; WAN_GGUF, WAN_GGUF_REV = PINS["wan_gguf"]
-BASE = snapshot_download(WAN_BASE, revision=WAN_BASE_REV,
-                         allow_patterns=["model_index.json", "scheduler/*", "vae/*", "tokenizer/*",
-                                         "text_encoder/*", "transformer/config.json",
-                                         "transformer_2/config.json"])
-HIGH = hf_hub_download(WAN_GGUF, PINS["wan_high"], revision=WAN_GGUF_REV)
-LOW = hf_hub_download(WAN_GGUF, PINS["wan_low"], revision=WAN_GGUF_REV)
+def sh(c, quiet=False):
+    if not quiet: print(f"$ {c[:150]}", flush=True)
+    r = subprocess.run(c, shell=True, text=True, capture_output=True)
+    if r.stdout.strip() and not quiet: print(r.stdout[-1200:], flush=True)
+    if r.returncode: print("ERR:", r.stderr[-1200:], flush=True)
+    return r.returncode
 
-def sha_of(p, n=20):
-    h = hashlib.sha256()
-    with open(p, "rb") as f:
-        for c in iter(lambda: f.read(1 << 22), b""):
-            h.update(c)
-    return h.hexdigest()[:n]
-WAN_HASHES = {"high_noise_gguf": sha_of(HIGH), "low_noise_gguf": sha_of(LOW),
-              "vae": sha_of(f"{BASE}/vae/diffusion_pytorch_model.safetensors")}
-print("wan sha256:", WAN_HASHES, flush=True)
+def clock(tag):
+    print(f"  \u23f1 {tag} \u00b7 t+{(time.time()-T_START)/60:.1f} min", flush=True)
 
-LOOP_PROMPT = ("Photograph, locked-off tripod shot, a dark blacksmith's forge at night. A polished steel "
-               "sword lies across a bed of glowing orange coals in a stone hearth; an iron anvil stands "
-               "behind it. Subtle, continuous, natural motion only: heat haze shimmers above the coals, "
-               "the embers pulse and breathe with a slow orange glow, thin grey smoke drifts and curls "
-               "gently in place, warm firelight flickers softly across the blade and the anvil. The "
-               "blade, the hearth and the camera stay perfectly still. Cinematic, photorealistic, "
-               "shallow depth of field, fine film grain. The motion is gentle and steady and the scene "
-               "returns to exactly where it began, looping seamlessly.")
-LOOP_NEG = ("camera movement, pan, zoom, dolly, handheld shake, cut, scene change, morphing, deformed "
-            "blade, blade moving, extra objects, people, hands, text, watermark, subtitles, blurry, low "
-            "quality, JPEG artifacts, overexposed, oversaturated, cartoon, painting, flicker, jitter")
+import numpy as np
+import torch
+np.random.seed(SEED); torch.manual_seed(SEED)
+NGPU = torch.cuda.device_count()
+print(f"[stage {sys.argv[1]}] torch {torch.__version__} \u00b7 {NGPU} gpu(s)", flush=True)
 
-def prompt_clean(t):
-    t = html.unescape(html.unescape(ftfy.fix_text(t)))
-    return re.sub(r"\s+", " ", t).strip()
 
-# umT5-XXL (11.4 GB bf16) is encoded first and freed — it and an expert cannot share a card.
-tok = AutoTokenizer.from_pretrained(BASE, subfolder="tokenizer")
-te = UMT5EncoderModel.from_pretrained(BASE, subfolder="text_encoder", torch_dtype=torch.bfloat16).to("cuda:0").eval()
-def embed(text, max_len=512):
-    ids = tok([prompt_clean(text)], padding="max_length", max_length=max_len, truncation=True,
-              add_special_tokens=True, return_attention_mask=True, return_tensors="pt")
-    n = int(ids.attention_mask.gt(0).sum(dim=1)[0])
-    with torch.no_grad():
-        h = te(ids.input_ids.to("cuda:0"), ids.attention_mask.to("cuda:0")).last_hidden_state[0].float().cpu()
-    return torch.cat([h[:n], h.new_zeros(max_len - n, h.size(1))])[None]
-PE, NE = embed(LOOP_PROMPT), embed(LOOP_NEG)
-assert torch.isfinite(PE).all() and torch.isfinite(NE).all(), "text embeddings not finite"
-PE, NE = PE.to("cuda:0"), NE.to("cuda:0")      # the pipeline casts their dtype but never moves them
-del te; gc.collect(); torch.cuda.empty_cache()
+def stage_still():
+    from PIL import Image
+    from huggingface_hub import hf_hub_download, snapshot_download
+    from diffusers import ZImagePipeline
 
-class NaNLatent(RuntimeError):
-    pass
+    ART_PROMPT = (
+        "A single forged steel sword lying across a bed of white-hot coals inside a dark blacksmith's "
+        "forge at night. The blade is freshly quenched, its edge still glowing orange along a "
+        "hardening line, the polished steel reflecting the fire. Fine sparks rise through the smoky "
+        "air. Heavy stone anvil and soot-blackened brick behind, deep shadow, one warm light source "
+        "from the coals below. Shot on a 85mm lens at f/2, shallow depth of field, volumetric haze, "
+        "photorealistic, cinematic colour grade, ultra sharp detail on the blade, album cover.")
+    ART_NEG = ("cartoon, illustration, painting, cgi render, plastic, blurry, low detail, watermark, "
+               "text, signature, extra swords, hands, people, oversaturated, orange filter")
+    IMAGE_REV = PINS["image"][1]
+    img_pipe = ZImagePipeline.from_pretrained(PINS["image"][0], revision=IMAGE_REV, torch_dtype=torch.bfloat16)
+    img_pipe.enable_sequential_cpu_offload()
+    if hasattr(img_pipe, "vae"):
+        img_pipe.vae.enable_tiling()
+    STILL_SEEDS, HUMAN_PICK = [SEED, 5150, 6270, 7380], 6270
+    t0 = time.time(); stills = []
+    for seed in STILL_SEEDS:
+        im = img_pipe(prompt=ART_PROMPT, negative_prompt=ART_NEG, width=896, height=896,
+                      num_inference_steps=9, guidance_scale=0.0,
+                      generator=torch.Generator(device="cuda").manual_seed(seed)).images[0]
+        p = OUT / f"still_{seed}.png"; im.save(p)
+        a = np.asarray(im.convert("RGB"), dtype=np.float32) / 255
+        g = a.mean(-1); gy, gx = np.gradient(g)
+        stills.append({"seed": seed, "file": p.name,
+                       "detail": round(float(np.sqrt(gx**2 + gy**2).mean() * 255), 2),
+                       "warm": round(float((a[..., 0] - a[..., 2]).clip(0).mean() * 255), 2),
+                       "dark_frac": round(float((g < 0.25).mean()), 3)})
+        print(f"  still seed {seed}: {stills[-1]}", flush=True)
+    print(f"{len(stills)} stills in {time.time()-t0:.0f}s", flush=True)
+    scorer_pick = max(stills, key=lambda c: c["detail"] * (1 + c["warm"] / 40) * (0.5 + c["dark_frac"]))
+    pick = next((c for c in stills if c["seed"] == HUMAN_PICK), scorer_pick)
+    (WORK / "stills.json").write_text(json.dumps({"candidates": stills, "scorer_pick": scorer_pick,
+        "human_pick": HUMAN_PICK, "shipped": pick, "image_revision": IMAGE_REV}, indent=2))
+    shutil.copy(OUT / pick["file"], OUT / "cover.png")
+    sh(f"ffmpeg -v error -i '{OUT}/cover.png' -vf scale=3000:3000:flags=lanczos '{OUT}/cover_3000.png' -y", quiet=True)
+    print("cover still:", pick, "(scorer preferred", scorer_pick["seed"], ")", flush=True)
+    del img_pipe
 
-class PinnedSigmas(FlowMatchEulerDiscreteScheduler):
-    PRE_SHIFT = [1.0, 0.75, 0.5, 0.25]      # -> [1.0, 0.9375, 0.8333, 0.625] after shift 5
-    def set_timesteps(self, num_inference_steps=None, device=None, sigmas=None, mu=None, timesteps=None):
-        return super().set_timesteps(device=device, sigmas=list(self.PRE_SHIFT))
 
-def build_wan(dtype):
-    vae = AutoencoderKLWan.from_pretrained(BASE, subfolder="vae", torch_dtype=torch.float32)
-    q = GGUFQuantizationConfig(compute_dtype=dtype)
-    high = WanTransformer3DModel.from_single_file(HIGH, quantization_config=q, config=BASE,
-                                                  subfolder="transformer", torch_dtype=dtype)
-    low = WanTransformer3DModel.from_single_file(LOW, quantization_config=q, config=BASE,
-                                                 subfolder="transformer_2", torch_dtype=dtype)
-    p = WanImageToVideoPipeline.from_pretrained(BASE, transformer=high, transformer_2=low, vae=vae,
-                                                text_encoder=None, tokenizer=None, torch_dtype=dtype)
-    p.vae.enable_tiling()
-    if NGPU >= 2:
-        high.to("cuda:0"); vae.to("cuda:0"); low.to("cuda:1")
-        _fwd = low.forward
-        def _across(*a, **k):
-            a = [x.to("cuda:1") if torch.is_tensor(x) else x for x in a]
-            k = {n: (v.to("cuda:1") if torch.is_tensor(v) else v) for n, v in k.items()}
-            out = _fwd(*a, **k)
-            if isinstance(out, tuple):
-                return tuple(o.to("cuda:0") if torch.is_tensor(o) else o for o in out)
-            return out.__class__(sample=out.sample.to("cuda:0"))
-        low.forward = _across
-        print("wan placement: high-noise cuda:0 · low-noise cuda:1 · vae cuda:0", flush=True)
-    else:
-        p.enable_model_cpu_offload()
-        print("wan placement: one card, model offload", flush=True)
-    p.scheduler = PinnedSigmas(shift=5.0)
-    return p
+def stage_loop():
+    import ftfy, html
+    from transformers import AutoTokenizer, UMT5EncoderModel
+    from diffusers import (AutoencoderKLWan, FlowMatchEulerDiscreteScheduler, GGUFQuantizationConfig,
+                           WanImageToVideoPipeline, WanTransformer3DModel)
 
-def guard(pipe_, i, t, kw):
-    lat = kw["latents"]
-    if not torch.isfinite(lat).all():
-        raise NaNLatent(f"non-finite latents after step {i}")
-    print(f"    wan step {i} · t={float(t):.0f} · t+{(time.time()-T_START)/60:.1f} min", flush=True)
-    return {}
+    FPS, NF, STEPS, XF = 16, 81, 4, 6
+    WAN_BASE, WAN_BASE_REV = PINS["wan_base"]; WAN_GGUF, WAN_GGUF_REV = PINS["wan_gguf"]
+    BASE = snapshot_download(WAN_BASE, revision=WAN_BASE_REV,
+                             allow_patterns=["model_index.json", "scheduler/*", "vae/*", "tokenizer/*",
+                                             "text_encoder/*", "transformer/config.json",
+                                             "transformer_2/config.json"])
+    HIGH = hf_hub_download(WAN_GGUF, PINS["wan_high"], revision=WAN_GGUF_REV)
+    LOW = hf_hub_download(WAN_GGUF, PINS["wan_low"], revision=WAN_GGUF_REV)
 
-def decode_latents(pipe_, latents):
-    """The pipeline's own decode, done explicitly after the experts are parked."""
-    if NGPU < 2:
-        pipe_.transformer.to("cpu"); pipe_.transformer_2.to("cpu")
-        gc.collect(); torch.cuda.empty_cache()
-    vae = pipe_.vae.to("cuda:0")
-    lat = latents.to(vae.dtype)
-    mean = torch.tensor(vae.config.latents_mean).view(1, vae.config.z_dim, 1, 1, 1).to(lat.device, lat.dtype)
-    std = 1.0 / torch.tensor(vae.config.latents_std).view(1, vae.config.z_dim, 1, 1, 1).to(lat.device, lat.dtype)
-    lat = lat / std + mean
-    with torch.no_grad():
-        video = vae.decode(lat, return_dict=False)[0]
-    video = pipe_.video_processor.postprocess_video(video, output_type="np")[0]
-    return (np.clip(video, 0, 1) * 255).round().astype(np.uint8)
+    def sha_of(p, n=20):
+        h = hashlib.sha256()
+        with open(p, "rb") as f:
+            for c in iter(lambda: f.read(1 << 22), b""):
+                h.update(c)
+        return h.hexdigest()[:n]
+    WAN_HASHES = {"high_noise_gguf": sha_of(HIGH), "low_noise_gguf": sha_of(LOW),
+                  "vae": sha_of(f"{BASE}/vae/diffusion_pytorch_model.safetensors")}
+    print("wan sha256:", WAN_HASHES, flush=True)
 
-def gen_loop(pipe_, still, W, H, seed):
-    img = still.resize((W, H), Image.LANCZOS)          # square -> square, no distortion
-    g = torch.Generator(device="cuda:0").manual_seed(seed)
-    out = pipe_(image=img, last_image=img, prompt_embeds=PE, negative_prompt_embeds=NE,
-                height=H, width=W, num_frames=NF, num_inference_steps=STEPS, guidance_scale=1.0,
-                generator=g, output_type="latent", callback_on_step_end=guard)
-    frames = decode_latents(pipe_, out.frames)
-    return frames, np.asarray(img)
+    LOOP_PROMPT = ("Photograph, locked-off tripod shot, a dark blacksmith's forge at night. A polished steel "
+                   "sword lies across a bed of glowing orange coals in a stone hearth; an iron anvil stands "
+                   "behind it. Subtle, continuous, natural motion only: heat haze shimmers above the coals, "
+                   "the embers pulse and breathe with a slow orange glow, thin grey smoke drifts and curls "
+                   "gently in place, warm firelight flickers softly across the blade and the anvil. The "
+                   "blade, the hearth and the camera stay perfectly still. Cinematic, photorealistic, "
+                   "shallow depth of field, fine film grain. The motion is gentle and steady and the scene "
+                   "returns to exactly where it began, looping seamlessly.")
+    LOOP_NEG = ("camera movement, pan, zoom, dolly, handheld shake, cut, scene change, morphing, deformed "
+                "blade, blade moving, extra objects, people, hands, text, watermark, subtitles, blurry, low "
+                "quality, JPEG artifacts, overexposed, oversaturated, cartoon, painting, flicker, jitter")
 
-def measure_loop(path, w=256):
-    sh(f"ffmpeg -v error -i '{path}' -vf scale={w}:{w} -f rawvideo -pix_fmt rgb24 /tmp/v.rgb -y", quiet=True)
-    a = np.fromfile("/tmp/v.rgb", dtype=np.uint8).reshape(-1, w, w, 3).astype(np.float32) / 255
-    l = 0.2126 * a[..., 0] + 0.7152 * a[..., 1] + 0.0722 * a[..., 2]
-    per = np.abs(np.diff(l, axis=0)).reshape(len(a) - 1, -1).mean(1) * 255
-    wrap = float(np.abs(l[-1] - l[0]).mean() * 255); typical = float(np.percentile(per, 95))
-    return {"frames": int(len(a)), "cuts": int((np.abs(np.diff(l.reshape(len(a), -1).mean(1))) > 0.10).sum()),
-            "ti_mean": round(float(per.mean()), 2), "wrap_delta": round(wrap, 2),
-            "typical_frame_delta": round(typical, 2), "wrap_ratio": round(wrap / max(typical, 1e-6), 2),
-            "luma_mean": round(float(l.mean()), 3), "luma_std_min": round(float(l.std(axis=(1, 2)).min()), 4)}
+    def prompt_clean(t):
+        t = html.unescape(html.unescape(ftfy.fix_text(t)))
+        return re.sub(r"\s+", " ", t).strip()
 
-def encode_loop(loop, base):
-    fdir = Path(f"/tmp/frames_{Path(base).name}"); fdir.mkdir(exist_ok=True)
-    for f in fdir.glob("*.png"): f.unlink()
-    for i, f in enumerate(loop):
-        Image.fromarray(f).save(fdir / f"{i:04d}.png")
-    raw = f"{base}_raw.mp4"
-    sh(f"ffmpeg -v error -framerate {FPS} -i '{fdir}/%04d.png' -c:v libx264 -crf 12 -preset slow -pix_fmt yuv420p '{raw}' -y", quiet=True)
-    sh(f"ffmpeg -v error -i '{raw}' -c:v libvpx-vp9 -crf 30 -b:v 0 -row-mt 1 -cpu-used 1 -g 240 -pix_fmt yuv420p -an '{base}.webm' -y", quiet=True)
-    sh(f"ffmpeg -v error -i '{raw}' -c:v libx264 -preset veryslow -crf 20 -pix_fmt yuv420p -movflags +faststart -an '{base}.mp4' -y", quiet=True)
-    sh(f"ffmpeg -v error -i '{raw}' -vf scale=1080:1080:flags=lanczos -c:v libvpx-vp9 -crf 33 -b:v 0 -row-mt 1 -cpu-used 1 -g 240 -pix_fmt yuv420p -an '{base}_1080.webm' -y", quiet=True)
-    return raw
+    # umT5-XXL (11.4 GB bf16) is encoded first and freed — it and an expert cannot share a card.
+    tok = AutoTokenizer.from_pretrained(BASE, subfolder="tokenizer")
+    te = UMT5EncoderModel.from_pretrained(BASE, subfolder="text_encoder", torch_dtype=torch.bfloat16).to("cuda:0").eval()
+    def embed(text, max_len=512):
+        ids = tok([prompt_clean(text)], padding="max_length", max_length=max_len, truncation=True,
+                  add_special_tokens=True, return_attention_mask=True, return_tensors="pt")
+        n = int(ids.attention_mask.gt(0).sum(dim=1)[0])
+        with torch.no_grad():
+            h = te(ids.input_ids.to("cuda:0"), ids.attention_mask.to("cuda:0")).last_hidden_state[0].float().cpu()
+        return torch.cat([h[:n], h.new_zeros(max_len - n, h.size(1))])[None]
+    PE, NE = embed(LOOP_PROMPT), embed(LOOP_NEG)
+    assert torch.isfinite(PE).all() and torch.isfinite(NE).all(), "text embeddings not finite"
+    PE, NE = PE.to("cuda:0"), NE.to("cuda:0")      # the pipeline casts their dtype but never moves them
+    del te; gc.collect(); torch.cuda.empty_cache()
 
-still_img = Image.open(OUT / "cover.png").convert("RGB")
-loop_rec, wan_pipe, wan_dtype = None, None, torch.float16
-for size in (640, 576, 480):
-    W = H = size
-    for attempt in range(2):
-        try:
-            if wan_pipe is None:
-                wan_pipe = build_wan(wan_dtype)
-            print(f"\n=== loop {size}² · {NF} frames · {STEPS} steps · {wan_dtype} ===", flush=True)
-            t0 = time.time()
-            frames, ref = gen_loop(wan_pipe, still_img, W, H, SEED)
-            gen_s = time.time() - t0
-            L = frames[:-1]                                     # drop the duplicated pinned frame
-            w_ = (np.arange(1, XF + 1) / (XF + 1))[:, None, None, None]
-            blend = ((1 - w_) * L[-XF:].astype(np.float32) + w_ * L[:XF].astype(np.float32)).round().astype(np.uint8)
-            XL = np.concatenate([L[XF:len(L) - XF], blend])     # the dissolve loop
-            raw_xf = encode_loop(XL, str(OUT / "STEEL_cover_loop"))
-            encode_loop(L, str(OUT / "STEEL_cover_loop_cut"))
-            idx = np.linspace(0, len(XL) - 1, 8).round().astype(int)
-            Image.fromarray(np.concatenate([XL[i] for i in idx], axis=1)).save(OUT / "STEEL_cover_loop_sheet.jpg", quality=88)
-            Image.fromarray(np.concatenate([XL[i] for i in (-3, -2, -1, 0, 1, 2)], axis=1)).save(OUT / "STEEL_cover_loop_seam.jpg", quality=90)
-            ref_f = ref.astype(np.float32)
-            loop_rec = {"model": "Wan2.2-I2V-A14B lightx2v-4step Q4_K_M (jayn7 GGUF)", "hashes": WAN_HASHES,
-                        "closure": f"first==last frame pinned (last_image); delivered as a {XF}-frame dissolve of tail into head; hard cut beside it",
-                        "dtype": str(wan_dtype).replace("torch.", ""), "res": [W, H], "fps": FPS,
-                        "gen_seconds": round(gen_s, 1), "seed": SEED, "prompt": LOOP_PROMPT,
-                        "pin_mae_first": round(float(np.abs(frames[0].astype(np.float32) - ref_f).mean()), 2),
-                        "pin_mae_last": round(float(np.abs(frames[-1].astype(np.float32) - ref_f).mean()), 2),
-                        "dissolve": measure_loop(str(OUT / "STEEL_cover_loop.webm")),
-                        "cut": measure_loop(str(OUT / "STEEL_cover_loop_cut.webm"))}
-            (WORK / "loop_verify.json").write_text(json.dumps(loop_rec, indent=2))
-            print("LOOP:", json.dumps(loop_rec["dissolve"]), flush=True)
-            for f in (OUT / "STEEL_cover_loop_cut_raw.mp4",):
-                f.unlink(missing_ok=True)
-            break
-        except NaNLatent as e:
-            print(f"loop {size}: {e}", flush=True)
-            if wan_dtype is torch.float32:
+    class NaNLatent(RuntimeError):
+        pass
+
+    class PinnedSigmas(FlowMatchEulerDiscreteScheduler):
+        PRE_SHIFT = [1.0, 0.75, 0.5, 0.25]      # -> [1.0, 0.9375, 0.8333, 0.625] after shift 5
+        def set_timesteps(self, num_inference_steps=None, device=None, sigmas=None, mu=None, timesteps=None):
+            return super().set_timesteps(device=device, sigmas=list(self.PRE_SHIFT))
+
+    def build_wan(dtype):
+        vae = AutoencoderKLWan.from_pretrained(BASE, subfolder="vae", torch_dtype=torch.float32)
+        q = GGUFQuantizationConfig(compute_dtype=dtype)
+        high = WanTransformer3DModel.from_single_file(HIGH, quantization_config=q, config=BASE,
+                                                      subfolder="transformer", torch_dtype=dtype)
+        low = WanTransformer3DModel.from_single_file(LOW, quantization_config=q, config=BASE,
+                                                     subfolder="transformer_2", torch_dtype=dtype)
+        p = WanImageToVideoPipeline.from_pretrained(BASE, transformer=high, transformer_2=low, vae=vae,
+                                                    text_encoder=None, tokenizer=None, torch_dtype=dtype)
+        p.vae.enable_tiling()
+        if NGPU >= 2:
+            high.to("cuda:0"); vae.to("cuda:0"); low.to("cuda:1")
+            _fwd = low.forward
+            def _across(*a, **k):
+                a = [x.to("cuda:1") if torch.is_tensor(x) else x for x in a]
+                k = {n: (v.to("cuda:1") if torch.is_tensor(v) else v) for n, v in k.items()}
+                out = _fwd(*a, **k)
+                if isinstance(out, tuple):
+                    return tuple(o.to("cuda:0") if torch.is_tensor(o) else o for o in out)
+                return out.__class__(sample=out.sample.to("cuda:0"))
+            low.forward = _across
+            print("wan placement: high-noise cuda:0 · low-noise cuda:1 · vae cuda:0", flush=True)
+        else:
+            p.enable_model_cpu_offload()
+            print("wan placement: one card, model offload", flush=True)
+        p.scheduler = PinnedSigmas(shift=5.0)
+        return p
+
+    def guard(pipe_, i, t, kw):
+        lat = kw["latents"]
+        if not torch.isfinite(lat).all():
+            raise NaNLatent(f"non-finite latents after step {i}")
+        print(f"    wan step {i} · t={float(t):.0f} · t+{(time.time()-T_START)/60:.1f} min", flush=True)
+        return {}
+
+    def decode_latents(pipe_, latents):
+        '''The pipeline's own decode, done explicitly after the experts are parked.'''
+        if NGPU < 2:
+            pipe_.transformer.to("cpu"); pipe_.transformer_2.to("cpu")
+            gc.collect(); torch.cuda.empty_cache()
+        vae = pipe_.vae.to("cuda:0")
+        lat = latents.to(vae.dtype)
+        mean = torch.tensor(vae.config.latents_mean).view(1, vae.config.z_dim, 1, 1, 1).to(lat.device, lat.dtype)
+        std = 1.0 / torch.tensor(vae.config.latents_std).view(1, vae.config.z_dim, 1, 1, 1).to(lat.device, lat.dtype)
+        lat = lat / std + mean
+        with torch.no_grad():
+            video = vae.decode(lat, return_dict=False)[0]
+        video = pipe_.video_processor.postprocess_video(video, output_type="np")[0]
+        return (np.clip(video, 0, 1) * 255).round().astype(np.uint8)
+
+    def gen_loop(pipe_, still, W, H, seed):
+        img = still.resize((W, H), Image.LANCZOS)          # square -> square, no distortion
+        g = torch.Generator(device="cuda:0").manual_seed(seed)
+        out = pipe_(image=img, last_image=img, prompt_embeds=PE, negative_prompt_embeds=NE,
+                    height=H, width=W, num_frames=NF, num_inference_steps=STEPS, guidance_scale=1.0,
+                    generator=g, output_type="latent", callback_on_step_end=guard)
+        frames = decode_latents(pipe_, out.frames)
+        return frames, np.asarray(img)
+
+    def measure_loop(path, w=256):
+        sh(f"ffmpeg -v error -i '{path}' -vf scale={w}:{w} -f rawvideo -pix_fmt rgb24 /tmp/v.rgb -y", quiet=True)
+        a = np.fromfile("/tmp/v.rgb", dtype=np.uint8).reshape(-1, w, w, 3).astype(np.float32) / 255
+        l = 0.2126 * a[..., 0] + 0.7152 * a[..., 1] + 0.0722 * a[..., 2]
+        per = np.abs(np.diff(l, axis=0)).reshape(len(a) - 1, -1).mean(1) * 255
+        wrap = float(np.abs(l[-1] - l[0]).mean() * 255); typical = float(np.percentile(per, 95))
+        return {"frames": int(len(a)), "cuts": int((np.abs(np.diff(l.reshape(len(a), -1).mean(1))) > 0.10).sum()),
+                "ti_mean": round(float(per.mean()), 2), "wrap_delta": round(wrap, 2),
+                "typical_frame_delta": round(typical, 2), "wrap_ratio": round(wrap / max(typical, 1e-6), 2),
+                "luma_mean": round(float(l.mean()), 3), "luma_std_min": round(float(l.std(axis=(1, 2)).min()), 4)}
+
+    def encode_loop(loop, base):
+        fdir = Path(f"/tmp/frames_{Path(base).name}"); fdir.mkdir(exist_ok=True)
+        for f in fdir.glob("*.png"): f.unlink()
+        for i, f in enumerate(loop):
+            Image.fromarray(f).save(fdir / f"{i:04d}.png")
+        raw = f"{base}_raw.mp4"
+        sh(f"ffmpeg -v error -framerate {FPS} -i '{fdir}/%04d.png' -c:v libx264 -crf 12 -preset slow -pix_fmt yuv420p '{raw}' -y", quiet=True)
+        sh(f"ffmpeg -v error -i '{raw}' -c:v libvpx-vp9 -crf 30 -b:v 0 -row-mt 1 -cpu-used 1 -g 240 -pix_fmt yuv420p -an '{base}.webm' -y", quiet=True)
+        sh(f"ffmpeg -v error -i '{raw}' -c:v libx264 -preset veryslow -crf 20 -pix_fmt yuv420p -movflags +faststart -an '{base}.mp4' -y", quiet=True)
+        sh(f"ffmpeg -v error -i '{raw}' -vf scale=1080:1080:flags=lanczos -c:v libvpx-vp9 -crf 33 -b:v 0 -row-mt 1 -cpu-used 1 -g 240 -pix_fmt yuv420p -an '{base}_1080.webm' -y", quiet=True)
+        return raw
+
+    from PIL import Image
+    still_img = Image.open(OUT / "cover.png").convert("RGB")
+    loop_rec, wan_pipe, wan_dtype = None, None, torch.float16
+    for size in (640, 576, 480):
+        W = H = size
+        for attempt in range(2):
+            try:
+                if wan_pipe is None:
+                    wan_pipe = build_wan(wan_dtype)
+                print(f"\n=== loop {size}² · {NF} frames · {STEPS} steps · {wan_dtype} ===", flush=True)
+                t0 = time.time()
+                frames, ref = gen_loop(wan_pipe, still_img, W, H, SEED)
+                gen_s = time.time() - t0
+                L = frames[:-1]                                     # drop the duplicated pinned frame
+                w_ = (np.arange(1, XF + 1) / (XF + 1))[:, None, None, None]
+                blend = ((1 - w_) * L[-XF:].astype(np.float32) + w_ * L[:XF].astype(np.float32)).round().astype(np.uint8)
+                XL = np.concatenate([L[XF:len(L) - XF], blend])     # the dissolve loop
+                raw_xf = encode_loop(XL, str(OUT / "STEEL_cover_loop"))
+                encode_loop(L, str(OUT / "STEEL_cover_loop_cut"))
+                idx = np.linspace(0, len(XL) - 1, 8).round().astype(int)
+                Image.fromarray(np.concatenate([XL[i] for i in idx], axis=1)).save(OUT / "STEEL_cover_loop_sheet.jpg", quality=88)
+                Image.fromarray(np.concatenate([XL[i] for i in (-3, -2, -1, 0, 1, 2)], axis=1)).save(OUT / "STEEL_cover_loop_seam.jpg", quality=90)
+                ref_f = ref.astype(np.float32)
+                loop_rec = {"model": "Wan2.2-I2V-A14B lightx2v-4step Q4_K_M (jayn7 GGUF)", "hashes": WAN_HASHES,
+                            "closure": f"first==last frame pinned (last_image); delivered as a {XF}-frame dissolve of tail into head; hard cut beside it",
+                            "dtype": str(wan_dtype).replace("torch.", ""), "res": [W, H], "fps": FPS,
+                            "gen_seconds": round(gen_s, 1), "seed": SEED, "prompt": LOOP_PROMPT,
+                            "pin_mae_first": round(float(np.abs(frames[0].astype(np.float32) - ref_f).mean()), 2),
+                            "pin_mae_last": round(float(np.abs(frames[-1].astype(np.float32) - ref_f).mean()), 2),
+                            "dissolve": measure_loop(str(OUT / "STEEL_cover_loop.webm")),
+                            "cut": measure_loop(str(OUT / "STEEL_cover_loop_cut.webm"))}
+                (WORK / "loop_verify.json").write_text(json.dumps(loop_rec, indent=2))
+                print("LOOP:", json.dumps(loop_rec["dissolve"]), flush=True)
+                for f in (OUT / "STEEL_cover_loop_cut_raw.mp4",):
+                    f.unlink(missing_ok=True)
                 break
-            del wan_pipe; wan_pipe = None; gc.collect(); torch.cuda.empty_cache(); wan_dtype = torch.float32
-            print("  rebuilding the animator in fp32", flush=True)
-        except torch.cuda.OutOfMemoryError as e:
-            print(f"loop {size}: OOM — {str(e)[:200]}", flush=True)
-            gc.collect(); torch.cuda.empty_cache(); break
-        except Exception as e:                       # anything else at this size: step down, recorded
-            print(f"loop {size}: {type(e).__name__}: {str(e)[:300]}", flush=True)
-            gc.collect(); torch.cuda.empty_cache(); break
-    if loop_rec:
-        break
-assert loop_rec, "no loop was produced at any size"
-del wan_pipe, PE, NE; release("after loop")
+            except NaNLatent as e:
+                print(f"loop {size}: {e}", flush=True)
+                if wan_dtype is torch.float32:
+                    break
+                del wan_pipe; wan_pipe = None; gc.collect(); torch.cuda.empty_cache(); wan_dtype = torch.float32
+                print("  rebuilding the animator in fp32", flush=True)
+            except torch.cuda.OutOfMemoryError as e:
+                print(f"loop {size}: OOM — {str(e)[:200]}", flush=True)
+                gc.collect(); torch.cuda.empty_cache(); break
+            except Exception as e:                       # anything else at this size: step down, recorded
+                print(f"loop {size}: {type(e).__name__}: {str(e)[:300]}", flush=True)
+                gc.collect(); torch.cuda.empty_cache(); break
+        if loop_rec:
+            break
+    assert loop_rec, "no loop was produced at any size"
+
+
+if __name__ == "__main__":
+    {"still": stage_still, "loop": stage_loop}[sys.argv[1]]()
+    print(f"[stage {sys.argv[1]}] done", flush=True)
+"""
+
+Path("/tmp/aq_stage.py").write_text(STAGE_SRC)
+Path("/tmp/aq_cfg.json").write_text(json.dumps({
+    "pins": {k: (list(v) if isinstance(v, tuple) else v) for k, v in PINS.items()},
+    "seed": SEED, "tmp": str(TMP), "work": str(WORK), "out": str(OUT), "hf_home": str(TMP / "hf")}))
+
+def run_stage(name, minutes):
+    t0 = time.time()
+    print(f"\n=== stage {name} (own process) ===", flush=True)
+    r = subprocess.run([sys.executable, "/tmp/aq_stage.py", name], text=True, timeout=minutes * 60)
+    print(f"stage {name}: rc={r.returncode} in {(time.time()-t0)/60:.1f} min", flush=True)
+    return r.returncode
+
+assert run_stage("still", 90) == 0, "the still stage failed — see its output above"
+stills_rec = json.loads((WORK / "stills.json").read_text())
+pick = stills_rec["shipped"]; IMAGE_REV = stills_rec["image_revision"]
+print("cover still:", pick, flush=True)
+clock("still chosen")
+
+assert run_stage("loop", 180) == 0, "the loop stage failed — see its output above"
+loop_rec = json.loads((WORK / "loop_verify.json").read_text())
+print("LOOP:", json.dumps(loop_rec["dissolve"]), flush=True)
 clock("loop delivered")
+release("before the song")
 
 # %% [markdown]
 # ## The instruments — pinned, and proven before anything expensive runs
@@ -672,8 +745,6 @@ NEW = """            elif resolved_device == "cuda":
                     self.dtype = torch.float16"""
 assert OLD in src, "ACE-Step changed under its pin — impossible unless the checkout failed"
 orch.write_text(src.replace(OLD, NEW, 1))
-
-release("before the song")
 
 def render_conf(name, seed, strength, rung, steps, duration):
     return {"project_root": str(REPO), "config_path": rung["model"], "checkpoint_dir": str(CKPT),
