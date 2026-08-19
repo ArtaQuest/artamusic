@@ -46,6 +46,7 @@ PINS = {
     # diffusers' single-file table), so NF4 is the route that works from python.
     "image": ("OzzyGT/Krea_2_Turbo_bnb_nf4", "5458debf8356a6646a5aa814de28dcea881f8a6d"),
     "image_fallback": ("Tongyi-MAI/Z-Image", "04cc4abb7c5069926f75c9bfde9ef43d49423021"),
+    "image_turbo": ("Tongyi-MAI/Z-Image-Turbo", "f332072aa78be7aecdf3ee76d5c247082da564a6"),
     "wan_base": ("Wan-AI/Wan2.2-I2V-A14B-Diffusers", "596658fd9ca6b7b71d5057529bbf319ecbc61d74"),
     "wan_gguf": ("jayn7/WAN2.2-I2V_A14B-DISTILL-LIGHTX2V-4STEP-GGUF",
                  "338fb8eedd8f485c9188cf1b1de541721fc81d66"),
@@ -296,6 +297,11 @@ def stage_krea():
     if int(_tf2.__version__.split(".")[0]) < 5:
         from transformers import AutoTokenizer     # 4.x needs vocab.json/merges.txt the repo lacks
         kw["tokenizer"] = AutoTokenizer.from_pretrained(str(Path(p) / "tokenizer"), use_fast=True)
+    # ACROSS BOTH CARDS. 11.2 GB of NF4 weights resident on one 15 GB T4 leaves too little for
+    # activations — it OOM'd on 2.38 GB at 1024 and again at 896. The pair exists; diffusers will
+    # place the components across it and route the tensors.
+    if NGPU >= 2:
+        kw["device_map"] = "balanced"
     try:
         pipe = Krea2Pipeline.from_pretrained(p, torch_dtype=torch.float16, **kw)
     except Exception:
@@ -304,10 +310,12 @@ def stage_krea():
         # neither the component nor the line, which is not something anyone can fix.
         traceback.print_exc()
         raise
-    pipe.to("cuda")
+    if NGPU < 2:
+        pipe.to("cuda")
     pipe.vae.to(torch.float32)
     if hasattr(pipe, "enable_vae_tiling"): pipe.enable_vae_tiling()
-    print("  Krea 2 Turbo ready (NF4, resident, fp16 compute)", flush=True)
+    print(f"  Krea 2 Turbo ready (NF4, fp16 compute, "
+          f"{'spread over both cards' if NGPU >= 2 else 'resident'})", flush=True)
     imgs, side = {}, 1024
     for name, brief in CFG["briefs"].items():
         t0 = time.time()
@@ -315,7 +323,7 @@ def stage_krea():
             try:
                 imgs[name] = pipe(prompt=brief, height=side, width=side, num_inference_steps=8,
                                   guidance_scale=0.0,
-                                  generator=torch.Generator("cuda").manual_seed(SEED)).images[0]
+                                  generator=torch.Generator("cuda:0").manual_seed(SEED)).images[0]
                 break
             except torch.cuda.OutOfMemoryError:
                 gc.collect(); torch.cuda.empty_cache()
@@ -333,7 +341,12 @@ def stage_zimage():
     # Z-Image BASE, not Turbo: base takes a real negative prompt and real CFG, which Turbo cannot,
     # and that is most of the difference between a catalogue frame and a directed one.
     from diffusers import ZImagePipeline
-    repo, rev = PINS["image_fallback"]
+    # TURBO, not base. Base is the better model — real CFG, real negative prompts — and on this
+    # hardware it rendered at 56 SECONDS A STEP: two stills in an hour, then the stage timed out.
+    # bf16 has no hardware path here and sequential offload streams every submodule, and those two
+    # costs multiply. Turbo is 8 steps with no CFG, which is 8x less work again, and it is the
+    # configuration that has actually produced four usable stills on a Kaggle card.
+    repo, rev = PINS["image_turbo"]
     # bfloat16, NOT float16: in fp16 this model emits PURE BLACK — it did exactly that here, four
     # images of min 0 max 0, and the run shipped them because nothing looked. Neither Kaggle card
     # has bf16 in hardware so it is emulated and slower, but a slow correct image beats a fast
@@ -349,17 +362,15 @@ def stage_zimage():
     pipe.vae.to(torch.float32)
     if hasattr(pipe, "enable_attention_slicing"): pipe.enable_attention_slicing("auto")
     if hasattr(pipe, "enable_vae_tiling"): pipe.enable_vae_tiling()
-    NEG = ("flat frontal studio lighting, evenly lit backdrop, stock photo staging, centred "
-           "symmetrical subject, cluttered background, oversaturated, plastic, watermark, text")
-    print("  Z-Image base ready (bf16, sequential offload, attention slicing)", flush=True)
+    print("  Z-Image Turbo ready (bf16, sequential offload, attention slicing)", flush=True)
     imgs = {}
     for name, brief in CFG["briefs"].items():
         t0 = time.time()
-        imgs[name] = pipe(prompt=brief, negative_prompt=NEG, height=896, width=896,
-                          num_inference_steps=32, guidance_scale=4.0,
-                          generator=torch.Generator("cuda").manual_seed(SEED)).images[0]
+        imgs[name] = pipe(prompt=brief, height=896, width=896,
+                          num_inference_steps=9, guidance_scale=0.0,
+                          generator=torch.Generator("cuda:0").manual_seed(SEED)).images[0]
         print(f"  {name}: {time.time()-t0:.0f}s", flush=True)
-    _score_and_save(imgs, f"Z-Image base ({repo})")
+    _score_and_save(imgs, f"Z-Image Turbo ({repo})")
     drop("Z-Image")
 
 
