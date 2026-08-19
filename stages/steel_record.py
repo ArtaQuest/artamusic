@@ -350,6 +350,8 @@ def clock(tag):
 
 import numpy as np
 import torch
+from PIL import Image
+from huggingface_hub import hf_hub_download, snapshot_download
 np.random.seed(SEED); torch.manual_seed(SEED)
 NGPU = torch.cuda.device_count()
 print(f"[stage {sys.argv[1]}] torch {torch.__version__} \u00b7 {NGPU} gpu(s)", flush=True)

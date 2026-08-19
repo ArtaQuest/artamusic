@@ -160,10 +160,35 @@ def push_verified(slug, title, py, public=True, sources=(), tries=6, allow_viola
     # Unskippable static check. Two kernels died on a NameError at module scope after the model
     # had already loaded — 40 ms of AST work would have caught both. A cheap check only helps if
     # it cannot be forgotten, so it lives here rather than in a habit.
-    from precheck import unbound
-    _bad = unbound(str((HERE / py).resolve()))
+    from precheck import unbound, unbound_in_functions
+    _src = str((HERE / py).resolve())
+    _bad = unbound(_src)
     if _bad:
         raise RuntimeError(f"{py}: unbound names at module scope {_bad} — refusing to push")
+    # Module scope is not the whole file. A stage function shipped to its own process died on the
+    # GPU at second three with NameError: snapshot_download, because the import lived in a sibling
+    # function. Same 40 ms of AST work, one scope deeper.
+    _badf = unbound_in_functions(_src)
+    if _badf:
+        raise RuntimeError(f"{py}: unbound names inside functions {_badf} — refusing to push")
+    # And any python source this file EMBEDS to run elsewhere (STAGE_SRC = r"""…""") is code too.
+    import ast as _ast, re as _re
+    for _m in _re.finditer(r'^([A-Z_]+)\s*=\s*r?"""', Path(_src).read_text(), _re.M):
+        _g = {}
+        try:
+            exec(compile(_ast.parse(Path(_src).read_text()), "<embed>", "exec"), {"__name__": "_x"}, _g)
+        except Exception:
+            break
+        _emb = _g.get(_m.group(1))
+        if isinstance(_emb, str) and "import" in _emb and "def " in _emb:
+            try:
+                _ast.parse(_emb)
+            except SyntaxError as _e:
+                raise RuntimeError(f"{py}: embedded {_m.group(1)} does not parse — {_e}")
+            _be = unbound_in_functions(_emb, is_src=True)
+            if _be:
+                raise RuntimeError(f"{py}: embedded {_m.group(1)} unbound names {_be} — refusing to push")
+        break
     # Tier-0 contracts: every v1 death class, checked in under a second on the bytes we push.
     # A kernel that would die for a non-GPU reason never leaves the laptop.
     from contract import check as _contract
