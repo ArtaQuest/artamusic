@@ -211,68 +211,7 @@ def sha20(p):
     return h.hexdigest()[:20]
 
 
-def stage_still():
-    # Krea 2 Turbo, NF4, resident. Two things decide whether this is fast or unusable on a T4:
-    # the repo bakes bnb_4bit_compute_dtype="bfloat16", and neither the T4 nor the P100 has bf16
-    # hardware — left alone, every quantised matmul falls back to fp32. And the VAE stays fp32,
-    # which costs almost nothing and is the documented cure for black decodes.
-    repo, rev = PINS["image"]
-    ok = True
-    try:
-        p = snapshot_download(repo, revision=rev)
-    except Exception as e:
-        print(f"  image repo unavailable ({str(e)[:100]})", flush=True); ok = False
-    imgs, model_used = {}, None
-    if ok:
-        try:
-            for sub in ("transformer/config.json", "text_encoder/config.json"):
-                f = Path(p) / sub
-                if f.exists():
-                    c = json.loads(f.read_text())
-                    q = c.get("quantization_config") or {}
-                    if q.get("bnb_4bit_compute_dtype") == "bfloat16":
-                        q["bnb_4bit_compute_dtype"] = "float16"
-                        c["quantization_config"] = q
-                        f.write_text(json.dumps(c))
-                        print(f"  patched {sub}: compute dtype -> float16", flush=True)
-            from diffusers import Krea2Pipeline
-            pipe = Krea2Pipeline.from_pretrained(p, torch_dtype=torch.float16)
-            pipe.to("cuda")
-            pipe.vae.to(torch.float32)
-            if hasattr(pipe, "enable_vae_tiling"): pipe.enable_vae_tiling()
-            model_used = f"Krea-2-Turbo NF4 ({repo})"
-            print("  Krea 2 Turbo ready (NF4, resident, fp16 compute)", flush=True)
-            for name, brief in CFG["briefs"].items():
-                t0 = time.time()
-                im = pipe(prompt=brief, height=1024, width=1024, num_inference_steps=8,
-                          guidance_scale=0.0,
-                          generator=torch.Generator("cuda").manual_seed(SEED)).images[0]
-                imgs[name] = im
-                print(f"  {name}: {time.time()-t0:.0f}s", flush=True)
-            del pipe
-        except Exception as e:
-            print(f"  Krea 2 failed ({type(e).__name__}: {str(e)[:200]}) — falling back", flush=True)
-            imgs, model_used = {}, None
-            gc.collect(); torch.cuda.empty_cache()
-    if not imgs:
-        # Z-Image BASE, not Turbo: it takes a real negative prompt and CFG, which Turbo cannot.
-        from diffusers import ZImagePipeline
-        repo, frev = PINS["image_fallback"]
-        pipe = ZImagePipeline.from_pretrained(repo, revision=frev, torch_dtype=torch.float16)
-        pipe.to("cuda"); pipe.vae.to(torch.float32)
-        if hasattr(pipe, "enable_vae_tiling"): pipe.enable_vae_tiling()
-        NEG = ("flat frontal studio lighting, evenly lit backdrop, stock photo staging, centred "
-               "symmetrical subject, cluttered background, oversaturated, plastic, watermark, text")
-        model_used = f"Z-Image base ({repo})"
-        print("  Z-Image base ready (fp16 resident)", flush=True)
-        for name, brief in CFG["briefs"].items():
-            t0 = time.time()
-            im = pipe(prompt=brief, negative_prompt=NEG, height=1024, width=1024,
-                      num_inference_steps=32, guidance_scale=4.0,
-                      generator=torch.Generator("cuda").manual_seed(SEED)).images[0]
-            imgs[name] = im
-            print(f"  {name}: {time.time()-t0:.0f}s", flush=True)
-        del pipe
+def _score_and_save(imgs, model_used):
     rec = {"model": model_used, "candidates": {}}
     for name, im in imgs.items():
         f = OUT / f"still_{name}.png"; im.save(f)
@@ -289,9 +228,75 @@ def stage_still():
     imgs[pick].save(OUT / "cover.png")
     sh(f"ffmpeg -v error -i '{OUT}/cover.png' -vf scale=3000:3000:flags=lanczos '{OUT}/cover_3000.png' -y", quiet=True)
     (WORK / "stills.json").write_text(json.dumps(rec, indent=2))
-    print("STILL:", json.dumps(rec)[:400], flush=True)
-    drop("Krea", "Z-Image")
-    gc.collect(); torch.cuda.empty_cache()
+    print("STILL:", json.dumps(rec)[:500], flush=True)
+
+
+def stage_krea():
+    # Krea 2 Turbo, NF4, resident. Two mechanical details decide whether this is fast or unusable:
+    # the repo bakes bnb_4bit_compute_dtype="bfloat16" and neither Kaggle card has bf16 in hardware
+    # (left alone, every quantised matmul falls back to fp32); and the VAE stays fp32, which costs
+    # almost nothing and is the documented cure for black decodes.
+    #
+    # This runs as its OWN PROCESS so that a failure here cannot leave weights on the card for the
+    # fallback to trip over — which is exactly what happened: Krea failed during loading, the
+    # in-process fallback inherited a full GPU, and Z-Image then OOM'd on 76 MB.
+    import traceback
+    from diffusers import Krea2Pipeline
+    repo, rev = PINS["image"]
+    p = snapshot_download(repo, revision=rev)
+    for sub in ("transformer/config.json", "text_encoder/config.json"):
+        f = Path(p) / sub
+        if f.exists():
+            c = json.loads(f.read_text())
+            q = c.get("quantization_config") or {}
+            if q.get("bnb_4bit_compute_dtype") == "bfloat16":
+                q["bnb_4bit_compute_dtype"] = "float16"
+                c["quantization_config"] = q
+                f.write_text(json.dumps(c))
+                print(f"  patched {sub}: compute dtype -> float16", flush=True)
+    try:
+        pipe = Krea2Pipeline.from_pretrained(p, torch_dtype=torch.float16)
+    except Exception:
+        # The whole point of a separate process: print the REAL traceback and exit non-zero.
+        # A swallowed str(e)[:200] said "'NoneType' object has no attribute 'get'" and named
+        # neither the component nor the line, which is not something anyone can fix.
+        traceback.print_exc()
+        raise
+    pipe.to("cuda")
+    pipe.vae.to(torch.float32)
+    if hasattr(pipe, "enable_vae_tiling"): pipe.enable_vae_tiling()
+    print("  Krea 2 Turbo ready (NF4, resident, fp16 compute)", flush=True)
+    imgs = {}
+    for name, brief in CFG["briefs"].items():
+        t0 = time.time()
+        imgs[name] = pipe(prompt=brief, height=1024, width=1024, num_inference_steps=8,
+                          guidance_scale=0.0,
+                          generator=torch.Generator("cuda").manual_seed(SEED)).images[0]
+        print(f"  {name}: {time.time()-t0:.0f}s", flush=True)
+    _score_and_save(imgs, f"Krea-2-Turbo NF4 ({repo})")
+    drop("Krea")
+
+
+def stage_zimage():
+    # Z-Image BASE, not Turbo: base takes a real negative prompt and real CFG, which Turbo cannot,
+    # and that is most of the difference between a catalogue frame and a directed one.
+    from diffusers import ZImagePipeline
+    repo, rev = PINS["image_fallback"]
+    pipe = ZImagePipeline.from_pretrained(repo, revision=rev, torch_dtype=torch.float16)
+    pipe.to("cuda"); pipe.vae.to(torch.float32)
+    if hasattr(pipe, "enable_vae_tiling"): pipe.enable_vae_tiling()
+    NEG = ("flat frontal studio lighting, evenly lit backdrop, stock photo staging, centred "
+           "symmetrical subject, cluttered background, oversaturated, plastic, watermark, text")
+    print("  Z-Image base ready (fp16 resident)", flush=True)
+    imgs = {}
+    for name, brief in CFG["briefs"].items():
+        t0 = time.time()
+        imgs[name] = pipe(prompt=brief, negative_prompt=NEG, height=1024, width=1024,
+                          num_inference_steps=32, guidance_scale=4.0,
+                          generator=torch.Generator("cuda").manual_seed(SEED)).images[0]
+        print(f"  {name}: {time.time()-t0:.0f}s", flush=True)
+    _score_and_save(imgs, f"Z-Image base ({repo})")
+    drop("Z-Image")
 
 
 def stage_loop():
@@ -444,7 +449,7 @@ def stage_loop():
 
 
 if __name__ == "__main__":
-    {"still": stage_still, "loop": stage_loop}[sys.argv[1]]()
+    {"krea": stage_krea, "zimage": stage_zimage, "loop": stage_loop}[sys.argv[1]]()
     print(f"[{sys.argv[1]}] done in {(time.time()-T0)/60:.1f} min", flush=True)
 '''
 
@@ -473,7 +478,10 @@ def run_stage(name, minutes):
     print(f"stage {name}: rc={r.returncode} in {(time.time()-t0)/60:.1f} min", flush=True)
     return r.returncode
 
-assert run_stage("still", 75) == 0, "the still stage failed — see its output above"
+if run_stage("krea", 75) != 0:
+    print("\nKrea 2 did not run — its traceback is above. Falling back to Z-Image base in a "
+          "FRESH process, so it starts on an empty card.", flush=True)
+    assert run_stage("zimage", 75) == 0, "both image models failed — see their output above"
 stills = json.loads((WORK / "stills.json").read_text())
 print("stills by:", stills["model"], "· shipped:", stills["shipped"], flush=True)
 clock("stills done")
