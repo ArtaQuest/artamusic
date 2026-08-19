@@ -218,6 +218,21 @@ def push_verified(slug, title, py, public=True, sources=(), tries=6, allow_viola
             print("  refused (no free slot / quota) — waiting, not verifying", flush=True)
             _t.sleep(300)
             continue
+        # A PUSH THAT PRINTED A URL LANDED, whatever happened next. The readback is a separate
+        # request and Kaggle drops connections; retrying the PUSH on a failed READBACK queues a
+        # second run of the same kernel, which is how one cover attempt filled both of an account's
+        # session slots with duplicates of itself. Retry the readback, never the push.
+        if "url:" in out and "error:  |" in out:
+            for _r in range(6):
+                _t.sleep(30)
+                try:
+                    a = api()
+                    d = _tf.mkdtemp()
+                    call(a.kernels_pull, f"{owner()}/{slug}", d, metadata=True, quiet=True)
+                    call(a.kernels_pull, f"{owner()}/{slug}", d, quiet=True)
+                    break
+                except Exception as e:
+                    print(f"  readback retry {_r}: {str(e)[:60]}", flush=True)
         _t.sleep(20)
         try:
             a = api()
