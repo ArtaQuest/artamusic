@@ -110,14 +110,25 @@ mem("encoders freed")
 # %%
 from diffusers import HunyuanVideo15Transformer3DModel
 t0 = time.time()
+# CAP EACH CARD, RATHER THAN LETTING IT FILL ONE. Left to itself, accelerate packed 10.0 GB onto
+# cuda:0 and 7.9 onto cuda:1, then the denoise asked for 1.91 GiB with 1.49 free and died. The
+# weights are 15.5 GB; the cards hold 14.56 each. Splitting them evenly and capping the halves
+# leaves both with real headroom for activations, which flow through BOTH cards because the layers
+# are split across them — so reserving room on only one would repeat the failure on the other.
 tr = HunyuanVideo15Transformer3DModel.from_pretrained(
-    REPO, revision=REV, subfolder="transformer", torch_dtype=torch.float16, device_map="auto")
-print(f"  transformer sharded in {time.time()-t0:.0f}s · device_map={getattr(tr,'hf_device_map',None)}",
-      flush=True)
+    REPO, revision=REV, subfolder="transformer", torch_dtype=torch.float16,
+    device_map="auto", max_memory={0: "8GiB", 1: "8GiB"})
+dm = getattr(tr, "hf_device_map", None) or {}
+print(f"  transformer sharded in {time.time()-t0:.0f}s · "
+      f"{sum(1 for v in dm.values() if v == 0)} blocks on cuda:0, "
+      f"{sum(1 for v in dm.values() if v == 1)} on cuda:1", flush=True)
 pipe.transformer = tr
-pipe.vae.to("cuda:0")
+# THE VAE STAYS ON THE HOST UNTIL IT IS NEEDED. It is 2.35 GB in fp16 and it does nothing at all
+# until the denoise has finished, so parking it on a card is 2.35 GB taken from the activations
+# that were 0.4 GB short.
+pipe.vae.to("cpu")
 if hasattr(pipe.vae, "enable_tiling"): pipe.vae.enable_tiling()
-mem("transformer + vae")
+mem("transformer sharded, vae on host")
 
 # %% [markdown]
 # ## Two steps, then decide
@@ -135,9 +146,22 @@ def run(steps):
                     negative_prompt_embeds=EMB["ne"].to("cuda:0"), negative_prompt_embeds_mask=EMB["nem"].to("cuda:0"),
                     negative_prompt_embeds_2=EMB["ne2"].to("cuda:0"), negative_prompt_embeds_mask_2=EMB["nem2"].to("cuda:0"),
                     height=H, width=W, num_frames=NF, num_inference_steps=steps,
-                    generator=torch.Generator("cuda:0").manual_seed(SEED), output_type="np")
+                    generator=torch.Generator("cuda:0").manual_seed(SEED), output_type="latent")
 
-t0 = time.time(); _ = run(2); per_step = (time.time() - t0) / 2
+
+def decode(lat):
+    """Bring the VAE back to a card only now, when the transformer's activations are gone."""
+    gc.collect(); torch.cuda.empty_cache()
+    free0 = torch.cuda.mem_get_info(0)[0] / 2**30
+    dev = "cuda:0" if free0 > 4.0 else "cuda:1"
+    print(f"  decoding on {dev} ({free0:.1f}G free on cuda:0)", flush=True)
+    pipe.vae.to(dev)
+    with torch.inference_mode():
+        out = pipe.vae.decode(lat.to(dev, pipe.vae.dtype), return_dict=False)[0]
+    return pipe.video_processor.postprocess_video(out, output_type="np")[0]
+
+t0 = time.time(); _probe = run(2); per_step = (time.time() - t0) / 2
+del _probe; gc.collect(); torch.cuda.empty_cache()
 mem("after 2 steps")
 print(f"\n  {per_step:.0f} s/step at {H}×{W}×{NF} WITH guidance", flush=True)
 BUDGET_S = 130 * 60
@@ -146,9 +170,9 @@ print(f"  → {STEPS} steps ≈ {per_step*STEPS/60:.0f} min", flush=True)
 
 # %%
 t0 = time.time()
-frames = run(STEPS)
+lat = run(STEPS)
 gen_s = time.time() - t0
-arr = (np.clip(frames.frames[0], 0, 1) * 255).round().astype(np.uint8)
+arr = (np.clip(decode(lat.frames), 0, 1) * 255).round().astype(np.uint8)
 print(f"  {len(arr)} frames in {gen_s/60:.1f} min", flush=True)
 Image.fromarray(arr[0]).save(OUT / "frame0.png")
 d = Path("/tmp/f"); d.mkdir(exist_ok=True)
