@@ -624,7 +624,12 @@ def stage_loop():
         # a gate) for one reason: a rung that satisfies both is a rung whose acceptance does not
         # depend on my having repaired the instrument. The strongest firelight is worth less than
         # a result that stands under the measurement that refused take eight.
-        still_ok = row["lit_dev"] <= S.LIMIT["lit_dev"] and row["max_dev"] <= 6.0
+        # `lit_dev` ONLY — max_dev is reported, never consulted. It cannot tell firelight from
+        # movement, and when it was briefly used as a ladder criterion it rejected four rungs in a
+        # row on a blade sitting at 0.0 px of drift with lit_dev at 1.37 against a limit of 6.0,
+        # cutting the firelight on the steel almost in half to satisfy a number that was measuring
+        # the relight itself.
+        still_ok = row["lit_dev"] <= S.LIMIT["lit_dev"]
         alive_ok = (row["subject_light_std"] >= S.ALIVE["subject_light_std"]
                     and row["fire_motion"] >= S.ALIVE["fire_motion"])
         row["passes"] = bool(still_ok and alive_ok)

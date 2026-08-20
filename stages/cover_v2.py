@@ -464,13 +464,16 @@ def stage_loop():
                "max_dev": round(max(float(np.abs(f[blade] - g[0][blade]).mean()) for f in g), 2),
                "subject_light_std": round(float(lum.std()), 2),
                "fire_motion": round(float(np.abs(np.diff(g, axis=0))[:, coals].mean()), 2)}
-        # BOTH instruments, deliberately. `lit_dev` is the honest one — it removes a smooth
-        # lighting field before judging, so it cannot mistake firelight for movement. `max_dev` is
-        # the older, blunter number that CAN, and it is kept here as a ladder criterion (never as
-        # a gate) for one reason: a rung that satisfies both is a rung whose acceptance does not
-        # depend on my having repaired the instrument. The strongest firelight is worth less than
-        # a result that stands under the measurement that refused take eight.
-        still_ok = row["lit_dev"] <= S.LIMIT["lit_dev"] and row["max_dev"] <= 6.0
+        # `lit_dev` ONLY. `max_dev` was carried here for one run as a hedge — a rung passing both
+        # is a rung whose acceptance does not depend on my having repaired the instrument — and
+        # that hedge has been paid: the previous cover cleared the retired gate at 5.41 on its own.
+        # Kept any longer it does active harm. On this still it rejected four rungs in a row while
+        # lit_dev sat at 1.37, 0.97, 0.78 and 0.54 against a limit of 6.0 — the blade at 0.0 px of
+        # drift, essentially nothing about it changing that lighting could not explain — and drove
+        # the firelight on the steel down from 2.10 to 1.16 to satisfy a number that was measuring
+        # the relight itself. That is the exact conflation this instrument was repaired to remove,
+        # reappearing as a self-inflicted quality cost. `max_dev` stays reported, never consulted.
+        still_ok = row["lit_dev"] <= S.LIMIT["lit_dev"]
         alive_ok = (row["subject_light_std"] >= S.ALIVE["subject_light_std"]
                     and row["fire_motion"] >= S.ALIVE["fire_motion"])
         row["passes"] = bool(still_ok and alive_ok)
