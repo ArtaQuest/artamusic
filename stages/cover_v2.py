@@ -52,7 +52,7 @@ PINS = {
                  "338fb8eedd8f485c9188cf1b1de541721fc81d66"),
     "wan_high": "high_noise_1030/wan2.2_i2v_A14b_high_noise_lightx2v_4step_1030-Q4_K_M.gguf",
     "wan_low": "low_noise/wan2.2_i2v_A14b_low_noise_lightx2v_4step-Q4_K_M.gguf",
-    "tools_sha": "f61078ee8ac7ff8437bee003a42e22bac9713196",  # ArtaQuest/artamusic lib/{stillness,freeze}.py
+    "tools_sha": "1a8fc3efa88a3533ed607faa27076394584c1e0a",  # ArtaQuest/artamusic lib/{stillness,freeze}.py
 }
 SEED = 4242
 
