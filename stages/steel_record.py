@@ -720,6 +720,13 @@ Path("/tmp/aq_cfg.json").write_text(json.dumps({
     "seed": SEED, "tmp": str(TMP), "work": str(WORK), "out": str(OUT), "hf_home": str(TMP / "hf"),
     "tools": str(TOOLS), "briefs": BRIEFS, "human_pick": HUMAN_PICK}))
 
+# A TIMEOUT THAT KILLS A SLOW STAGE IS A LIABILITY, NOT A SAFETY NET. The cover loop was measured
+# at 28 minutes on a T4 pair and then, on the very next run, took over 120 on the same declared
+# hardware with the same code — a 4x swing, almost certainly a shared host — and a 120-minute
+# timeout killed it two hours and twenty minutes in, with the work nearly done. These numbers exist
+# to catch a HUNG stage, and a hung stage is silent, whereas a slow one keeps printing; subprocess
+# cannot tell them apart, so the only honest setting is one generous enough that only a genuine
+# hang trips it. Kaggle's own twelve-hour session cap is the real backstop.
 def run_stage(name, minutes):
     t0 = time.time()
     print(f"\n=== stage {name} (own process) ===", flush=True)
@@ -727,13 +734,13 @@ def run_stage(name, minutes):
     print(f"stage {name}: rc={r.returncode} in {(time.time()-t0)/60:.1f} min", flush=True)
     return r.returncode
 
-assert run_stage("still", 90) == 0, "the still stage failed — see its output above"
+assert run_stage("still", 200) == 0, "the still stage failed — see its output above"
 stills_rec = json.loads((WORK / "stills.json").read_text())
 pick = stills_rec["shipped"]; IMAGE_REV = stills_rec["image_revision"]
 print("cover still:", pick, flush=True)
 clock("still chosen")
 
-assert run_stage("loop", 180) == 0, "the loop stage failed — see its output above"
+assert run_stage("loop", 330) == 0, "the loop stage failed — see its output above"
 loop_rec = json.loads((WORK / "loop_verify.json").read_text())
 print("LOOP frozen:", json.dumps(loop_rec["frozen"]), flush=True)
 print("LOOP alive :", json.dumps(loop_rec["alive"]), flush=True)
