@@ -7,7 +7,7 @@
 # | Rejected | Why it happened | What this notebook does |
 # |---|---|---|
 # | "the dagger should not move" | an image‑to‑video model animates *everything*; the blade drifted 18 px, its silhouette swung 15%, and its own pixels moved 5× more than the rest of the frame | the sword is painted OUT of the still, a plate with nothing to deform is animated, and the real sword is composited back — frozen by construction, re‑lit each frame so it still flickers |
-# | "make the still more epic" | a fast distilled 6B model, prompted in catalogue tag‑soup, lit flat and composed dead‑centre | **Krea 2 Turbo** (12.9B, trained with an explicit aesthetic reward) and a written brief that names medium, light direction, optics and composition |
+# | "make the still more epic" | one prompt of catalogue tag‑soup run at four seeds, lit flat, composed dead‑centre, and the blade left to become whatever the model felt like | four written **briefs** naming medium, light direction, optics and composition — and naming the things that were wrong when left unsaid: the blade must be the largest object, a sword has a crossguard and a grip, a coal is an irregular broken lump. A bigger model was sought and is not available here; see the pins |
 # | "not good overall" | nothing measured what was actually wrong: whole‑frame statistics cannot see a 3% subject, and no gate looked at the picture at all | two new instruments — `stillness.py` (does the rigid thing move? plus a liveness counter‑gate, since a frozen photograph passes any stillness test) — and this run stops at the cover so it can be looked at before the song is spent |
 #
 # Everything is pinned by revision and the run refuses rather than shipping something it cannot
@@ -41,11 +41,20 @@ def want_fast_downloads():
         return False
 
 PINS = {
-    # The image model. Krea 2 Turbo, 12.9B, in an NF4 diffusers layout that is ungated and 11.2 GB
-    # — the GGUF builds of this model are ComfyUI-only (Krea2Transformer2DModel is absent from
-    # diffusers' single-file table), so NF4 is the route that works from python.
-    "image": ("OzzyGT/Krea_2_Turbo_bnb_nf4", "5458debf8356a6646a5aa814de28dcea881f8a6d"),
-    "image_fallback": ("Tongyi-MAI/Z-Image", "04cc4abb7c5069926f75c9bfde9ef43d49423021"),
+    # THE IMAGE MODEL IS Z-IMAGE TURBO, and not for want of trying something bigger. Three routes
+    # to a stronger model were opened and all three closed:
+    #   Krea 2 Turbo (12.9B, aesthetic-reward trained) only ships for python as bitsandbytes NF4,
+    #     and a 4-bit quantised model cannot be dispatched across two cards — six runs, six
+    #     identical failures in 1.2 minutes each.
+    #   FLUX.1-Krea-dev is gated, and so is FLUX.1-schnell whose VAE and text encoders it would
+    #     borrow. A gated input fails this platform's own every-input-is-public check, and the
+    #     ungated copies are unofficial re-uploads.
+    #   Z-Image BASE — the same family, ungated, Apache-2.0, and genuinely better because it takes
+    #     real CFG and a real negative prompt — was measured on this exact hardware with the
+    #     transformer resident on one card and the encoder on the other: 896 OOM, 832 OOM, 768 OOM,
+    #     704 fits at 23.7 s/step, and then OOM'd anyway during the real render. It would be
+    #     smaller than Turbo and four times slower.
+    # So the model is fixed and the brief is where the quality comes from.
     "image_turbo": ("Tongyi-MAI/Z-Image-Turbo", "f332072aa78be7aecdf3ee76d5c247082da564a6"),
     "wan_base": ("Wan-AI/Wan2.2-I2V-A14B-Diffusers", "596658fd9ca6b7b71d5057529bbf319ecbc61d74"),
     "wan_gguf": ("jayn7/WAN2.2-I2V_A14B-DISTILL-LIGHTX2V-4STEP-GGUF",
@@ -74,8 +83,8 @@ PASCAL = 0 < CAP < 7.0
 sh("free -g | head -2; df -h /tmp | tail -1; nproc")
 
 # transformers is NOT pinned below 4.58 here. That ceiling exists for ACE-Step, which this
-# notebook does not use, and it was the single cause of three separate Krea 2 failures: the repo
-# was exported with transformers 5.x, whose config uses `rope_parameters` where 4.57 reads
+# notebook does not use, and inheriting it once produced three different-looking errors from one
+# cause: a repo exported with transformers 5.x whose config uses `rope_parameters` where 4.57 reads
 # `rope_scaling`, whose tokenizer_config carries `extra_special_tokens` as a LIST where 4.57
 # expects a dict, and whose tokenizer ships only tokenizer.json. Three symptoms, one version.
 sh("pip install -q 'diffusers==0.39.0' 'transformers>=5.13' accelerate safetensors "
@@ -102,9 +111,9 @@ clock("environment ready")
 # ## The brief — written, not tagged
 #
 # The rejected still was prompted the way people prompted CLIP models in 2023: a comma-separated
-# pile of quality words ("photorealistic, cinematic, ultra detailed, album cover"). Krea 2 is
-# conditioned by a vision-language model, and its own guide asks for **one dense paragraph of
-# natural language**, ordered subject → composition → light → style → crop.
+# pile of quality words ("photorealistic, cinematic, ultra detailed, album cover"). Z-Image is
+# conditioned by a language model, not by CLIP, and reads **one dense paragraph of natural
+# language**, ordered subject → composition → light → style → crop.
 #
 # Four things separate an epic frame from a catalogue photograph, and each is stated as a fact
 # rather than wished for:
@@ -117,8 +126,9 @@ clock("environment ready")
 # * **The optics are specific.** A 65 mm anamorphic at T2.8 with halation reads as cinema; "8k
 #   masterpiece" reads as nothing at all.
 #
-# Krea 2 Turbo is guidance‑free and takes **no negative prompt**, so every exclusion is phrased as
-# a positive fact — "an uncluttered frame falling to black", not "no clutter". Four different
+# Z‑Image Turbo is CFG‑distilled: it is guidance‑free and takes **no negative prompt**, so every
+# exclusion has to be phrased as a positive fact — "an uncluttered frame falling to black", not "no
+# clutter". (This is exactly what base would have bought, and base does not fit.) Four different
 # framings of one scene are rendered, so the sheet offers real alternatives rather than four
 # seeds of the same idea.
 
@@ -267,98 +277,6 @@ def _score_and_save(imgs, model_used):
     sh(f"ffmpeg -v error -i '{OUT}/cover.png' -vf scale=3000:3000:flags=lanczos '{OUT}/cover_3000.png' -y", quiet=True)
     (WORK / "stills.json").write_text(json.dumps(rec, indent=2))
     print("STILL:", json.dumps(rec)[:500], flush=True)
-
-
-def stage_krea():
-    # Krea 2 Turbo, NF4, resident. Two mechanical details decide whether this is fast or unusable:
-    # the repo bakes bnb_4bit_compute_dtype="bfloat16" and neither Kaggle card has bf16 in hardware
-    # (left alone, every quantised matmul falls back to fp32); and the VAE stays fp32, which costs
-    # almost nothing and is the documented cure for black decodes.
-    #
-    # This runs as its OWN PROCESS so that a failure here cannot leave weights on the card for the
-    # fallback to trip over — which is exactly what happened: Krea failed during loading, the
-    # in-process fallback inherited a full GPU, and Z-Image then OOM'd on 76 MB.
-    import traceback
-    from diffusers import Krea2Pipeline
-    repo, rev = PINS["image"]
-    p = snapshot_download(repo, revision=rev)
-    for sub in ("transformer/config.json", "text_encoder/config.json"):
-        f = Path(p) / sub
-        if not f.exists():
-            continue
-        c = json.loads(f.read_text())
-        changed = False
-        q = c.get("quantization_config") or {}
-        if q.get("bnb_4bit_compute_dtype") == "bfloat16":
-            q["bnb_4bit_compute_dtype"] = "float16"
-            c["quantization_config"] = q
-            changed = True
-            print(f"  {sub}: compute dtype -> float16", flush=True)
-        # transformers RENAMED rope_scaling -> rope_parameters, and this repo was exported with the
-        # newer name while the pinned transformers still reads the old one. Qwen3VLTextRotaryEmbedding
-        # then does config.rope_scaling.get(...) on None and the whole pipeline dies loading its
-        # second component. Translate the key back — the values are the repo's own, not invented.
-        import transformers as _tf
-        old_tf = int(_tf.__version__.split(".")[0]) < 5
-        for sub_cfg in ("text_config", "vision_config") if old_tf else ():
-            d = c.get(sub_cfg)
-            if isinstance(d, dict) and not d.get("rope_scaling") and isinstance(d.get("rope_parameters"), dict):
-                rp = dict(d["rope_parameters"])
-                if "rope_theta" in rp and not d.get("rope_theta"):
-                    d["rope_theta"] = rp["rope_theta"]
-                d["rope_scaling"] = {k: v for k, v in rp.items() if k != "rope_theta"}
-                changed = True
-                print(f"  {sub}/{sub_cfg}: rope_parameters -> rope_scaling "
-                      f"{json.dumps(d['rope_scaling'])}", flush=True)
-        if changed:
-            f.write_text(json.dumps(c))
-    # The repo ships tokenizer.json but not vocab.json/merges.txt, and the slow Qwen2Tokenizer that
-    # diffusers picks needs those two files: it was handed vocab_file=None. The FAST tokenizer reads
-    # tokenizer.json alone, so it is built explicitly and passed in.
-    import transformers as _tf2
-    print(f"  transformers {_tf2.__version__}", flush=True)
-    kw = {}
-    if int(_tf2.__version__.split(".")[0]) < 5:
-        from transformers import AutoTokenizer     # 4.x needs vocab.json/merges.txt the repo lacks
-        kw["tokenizer"] = AutoTokenizer.from_pretrained(str(Path(p) / "tokenizer"), use_fast=True)
-    # ACROSS BOTH CARDS. 11.2 GB of NF4 weights resident on one 15 GB T4 leaves too little for
-    # activations — it OOM'd on 2.38 GB at 1024 and again at 896. The pair exists; diffusers will
-    # place the components across it and route the tensors.
-    if NGPU >= 2:
-        kw["device_map"] = "balanced"
-    try:
-        pipe = Krea2Pipeline.from_pretrained(p, torch_dtype=torch.float16, **kw)
-    except Exception:
-        # The whole point of a separate process: print the REAL traceback and exit non-zero.
-        # A swallowed str(e)[:200] said "'NoneType' object has no attribute 'get'" and named
-        # neither the component nor the line, which is not something anyone can fix.
-        traceback.print_exc()
-        raise
-    if NGPU < 2:
-        pipe.to("cuda")
-    pipe.vae.to(torch.float32)
-    if hasattr(pipe, "enable_vae_tiling"): pipe.enable_vae_tiling()
-    print(f"  Krea 2 Turbo ready (NF4, fp16 compute, "
-          f"{'spread over both cards' if NGPU >= 2 else 'resident'})", flush=True)
-    imgs, side = {}, 1024
-    for name, brief in CFG["briefs"].items():
-        t0 = time.time()
-        for attempt in range(2):
-            try:
-                imgs[name] = pipe(prompt=brief, height=side, width=side, num_inference_steps=8,
-                                  guidance_scale=0.0,
-                                  generator=torch.Generator("cuda:0").manual_seed(SEED)).images[0]
-                break
-            except torch.cuda.OutOfMemoryError:
-                gc.collect(); torch.cuda.empty_cache()
-                if side == 1024:
-                    side = 896
-                    print(f"  {name}: no room at 1024 beside 11 GB of weights — 896", flush=True)
-                else:
-                    raise
-        print(f"  {name}: {time.time()-t0:.0f}s at {side}", flush=True)
-    _score_and_save(imgs, f"Krea-2-Turbo NF4 ({repo}) @{side}")
-    drop("Krea")
 
 
 def stage_zimage():
@@ -600,7 +518,7 @@ def stage_loop():
 
 
 if __name__ == "__main__":
-    {"krea": stage_krea, "zimage": stage_zimage, "loop": stage_loop}[sys.argv[1]]()
+    {"zimage": stage_zimage, "loop": stage_loop}[sys.argv[1]]()
     print(f"[{sys.argv[1]}] done in {(time.time()-T0)/60:.1f} min", flush=True)
 '''
 
@@ -629,10 +547,13 @@ def run_stage(name, minutes):
     print(f"stage {name}: rc={r.returncode} in {(time.time()-t0)/60:.1f} min", flush=True)
     return r.returncode
 
-if run_stage("krea", 75) != 0:
-    print("\nKrea 2 did not run — its traceback is above. Falling back to Z-Image base in a "
-          "FRESH process, so it starts on an empty card.", flush=True)
-    assert run_stage("zimage", 75) == 0, "both image models failed — see their output above"
+# KREA 2 IS GONE, NOT DISABLED. It was attempted on every run and failed on every run in the same
+# 1.2 minutes, with the same error: a bitsandbytes-quantised model cannot be dispatched across two
+# cards, and 11 GB resident leaves no room on one. Six identical tracebacks in the log of a healthy
+# run teach a reader that tracebacks here are normal, which is the last thing this notebook should
+# be teaching. The finding is recorded in the commit history and in the markdown above; the dead
+# attempt is not kept as decoration.
+assert run_stage("zimage", 75) == 0, "the image stage failed — see its output above"
 stills = json.loads((WORK / "stills.json").read_text())
 print("stills by:", stills["model"], "· shipped:", stills["shipped"], flush=True)
 clock("stills done")
