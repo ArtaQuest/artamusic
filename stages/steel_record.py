@@ -14,10 +14,10 @@
 #
 # | Stage | Model / instrument | What is claimed | How it is checked |
 # |---|---|---|---|
-# | Lyric | ArtaQuest's own text | craft profile vs a measured reference | `lyric_profile.py` at a pinned commit |
+# | Lyric | ArtaQuest's own text | craft profile vs a measured reference, AND followable on one hearing | `lyric_profile.py` + `clarity.py` at a pinned commit |
 # | Song | ACE-Step 1.5 XL (4.6B), style transfer from a public male take | male lead · intelligible · dynamic | YIN on a demucs stem · whisper large-v3 word accuracy · loudness / true peak / clipping |
-# | Still | Z-Image-Turbo (6.15B, Apache-2.0) | photoreal, chosen by measurement with the human veto recorded | edge energy · warmth · darkness, all printed |
-# | Loop | Wan2.2-I2V-A14B (Apache-2.0), first frame = last frame = the still | seamless, nothing moves backwards | zero cuts · wrap delta vs typical frame delta · motion energy |
+# | Still | Z-Image-Turbo (6.15B, Apache-2.0), four directed framings | photoreal, chosen by a person from four, the numbers recorded beside the choice | edge energy · warmth · darkness · a blank frame refused outright |
+# | Loop | Wan2.2-I2V-A14B (Apache-2.0); the sword painted out, the forge animated, the sword composited back frozen and re-lit | seamless, and the blade does not move at all | drift and displacement by normalised template matching INSIDE the blade's mask · change no lighting field can explain · and the counter-gate: the fire must be alive and its light must fall on the steel |
 # | Verify | the same instruments, on the delivered bytes | everything above | the run fails if any claim fails |
 #
 # Code, measurement tools and the lyric are public at github.com/ArtaQuest/artamusic
@@ -46,9 +46,10 @@ PINS = {
     "song_model": "acestep-v15-xl-sft",
     "measure_sha": "17b49399cfd6c24f4070353fc33643ae15e1331d",      # ArtaQuest/artamusic lib/measure.py
     "lyric_profile_sha": "ebee5bf324d8a6cff22ba666825a777c7dfc5c39",  # ArtaQuest/artamusic lib/lyric_profile.py
-    "lyric_sha": "88348bd9e0d21d196cb95c54c20b2943a629c68a",          # ArtaQuest/artamusic song/lyrics_steel.txt + lib/clarity.py
+    "lyric_sha": "88348bd9e0d21d196cb95c54c20b2943a629c68a",
+    "tools_sha": "1a8fc3efa88a3533ed607faa27076394584c1e0a",   # ArtaQuest/artamusic lib/{stillness,freeze}.py          # ArtaQuest/artamusic song/lyrics_steel.txt + lib/clarity.py
     "asr": "large-v3",
-    "image": ("Tongyi-MAI/Z-Image-Turbo", "f332072aa78be7aecdf3ee76d5c247082da564a6"),
+    "image_turbo": ("Tongyi-MAI/Z-Image-Turbo", "f332072aa78be7aecdf3ee76d5c247082da564a6"),
     "wan_base": ("Wan-AI/Wan2.2-I2V-A14B-Diffusers", "596658fd9ca6b7b71d5057529bbf319ecbc61d74"),
     "wan_gguf": ("jayn7/WAN2.2-I2V_A14B-DISTILL-LIGHTX2V-4STEP-GGUF",
                  "338fb8eedd8f485c9188cf1b1de541721fc81d66"),
@@ -243,22 +244,97 @@ BPM, KEYSCALE = 100, "F minor"   # match the conditioning reference; a key fight
 # ships the eye's choice. Arguing with a scorer is allowed; hiding the argument is not.
 
 # %% [markdown]
-# ## The cover loop — Wan2.2‑I2V‑A14B, first frame = last frame = the still
+# ## The cover loop — Wan2.2‑I2V‑A14B, and the sword composited back frozen
 #
 # The strongest open image‑to‑video model with an Apache‑2.0 licence that fits a free card:
 # Alibaba's two 14B experts, here as GGUF Q4_K_M with the lightx2v four‑step distillation, run at
-# the exact points it was trained on (t = 1000 · 750 · 500 · 250 under shift 5). The loop is
-# closed **by construction**: the same still is pinned as the first and the last frame, so the
-# clip must return to where it began and nothing is mirrored (heat, smoke and embers keep their
-# direction). Measured on the previous round, the hard cut still pops — the model returns to the
-# still inside its last pinned frame — so the delivered loop is a **6‑frame dissolve** of tail
-# into head, which measures smoother than an ordinary frame step; the hard cut is shipped beside
-# it for the record.
+# the exact points it was trained on (t = 1000 · 750 · 500 · 250 under shift 5).
+#
+# The loop used to be closed by pinning the same still as the first AND last frame, so the clip had
+# to return to where it began. That works, and it costs the thing the shot is for: the model spends
+# the clip travelling back, and the fire barely moves. Measured, the bill was plain — the pinned
+# generation scored 0.26 on fire motion against a floor of 1.0, and 1.70 for the loop that visibly
+# lived. So there is no pin. The wrap is closed by an 8‑frame dissolve of tail into head instead.
+#
+# And the sword does not hold still because the sampler was asked nicely. It is **painted out of
+# the photograph** by heat‑diffusion inpainting, the empty forge is animated, and the sword is
+# **composited back frozen** and re‑lit each frame from the coals behind it — so its pixels are
+# literally the same pixels, and only the light on them changes. No mask‑conditioned video model
+# preserves a region exactly; a pixel composite is the only thing that does.
+#
+# How hard to re‑light it is not a constant either. Too much and the stillness gate calls the blade
+# movement; too little and it reads as a cardboard cut‑out pasted over a moving plate. The run
+# walks a ladder from most firelight to least and keeps the first rung that satisfies both, and
+# publishes every rung beside the choice.
 #
 # On a Turing/Pascal card memory‑efficient attention exists only for fp16/fp32 (a bf16 model
 # silently falls back to O(N²) attention), so the experts compute in fp16 with an fp32 fallback
 # on any non‑finite latent. With two GPUs each expert lives on its own card; with one, they
 # swap through host RAM and the decode is done explicitly after both are parked.
+
+# ── the cover brief: four framings, written as a photographer would be briefed ────────────
+# One prompt run at four seeds gives four versions of the same idea. Four BRIEFS give four
+# different pictures to choose between, each saying where the camera is, what fills the frame and
+# what is deliberately left empty. Everything the model was previously free to invent — how big the
+# blade is, what a sword looks like, what a coal looks like, what else is in the room — is now
+# stated, because each of those was got wrong when it was left unsaid.
+SCENE = ("A cinematic still from a 70mm feature film. One great forged sword — a broad "
+         "double-edged blade with a straight crossguard and a leather-wrapped grip, unmistakably a "
+         "sword and the largest object in the frame — lies across a bed of white-hot coals in the "
+         "black interior of a vast forge hall cut into a mountain, its far walls and ceiling lost "
+         "in darkness. The coals are irregular broken lumps of glowing charcoal, cracked and "
+         "uneven, never uniform blocks. Nothing else is in the room: no tables, no tools, no "
+         "clutter. ")
+LIGHT = ("The only light is the fire itself: a hard low key raking in from camera-left, the right "
+         "third falling away into unlit black, thin volumetric shafts of smoke crossing the beam, "
+         "a sharp rim of orange along the blade's spine. ")
+OPTIC = ("Shot on 65mm Kodak Vision3 500T, anamorphic 40mm at T2.8, gentle horizontal flare, "
+         "halation blooming off the hot metal, fine grain, deep shadow detail held, high contrast, "
+         "solemn and monumental. An uncluttered frame with one subject and clean falloff to black.")
+BRIEFS = {
+    "low_hero": SCENE + ("The camera is low and close, almost at the level of the coals, looking up "
+                         "the length of the blade so it runs diagonally out of the bottom-left "
+                         "corner and the tip crosses the centre of the frame. The upper half is "
+                         "quiet dark air and drifting smoke, left empty for a title. ") + LIGHT + OPTIC,
+    # the light shaft was the best thing in take eight and the sword the worst — 1.5% of the
+    # frame, unreadable. Same shot, sword brought forward until it spans the hearth.
+    "wide_forge": SCENE + ("A wide shot down the length of the hall: the anvil and the burning "
+                           "hearth fill the lower third, the great sword laid across the coals in "
+                           "hard silhouette against their glow and spanning the whole width of the "
+                           "frame, and the upper two thirds is black cavernous air with one shaft "
+                           "of light falling from somewhere far above. ") + LIGHT + OPTIC,
+    "edge_macro": SCENE + ("Extreme close on the blade's edge crossing the frame on a shallow "
+                           "diagonal, the hardening line and hammer marks legible in the steel, "
+                           "coals blurred to molten bokeh behind, sparks suspended. The top-right "
+                           "quarter is empty darkness. ") + LIGHT + OPTIC,
+    # the overhead was the weakest of the four: straight down, the blade is a thin line and the
+    # coals win the picture. Replaced by the shot that says the thing the song says — an object
+    # left behind by people who are gone.
+    "altar": SCENE + ("The sword lies alone across a black iron anvil at the centre of the empty "
+                      "hall, the coals burning beneath it, everything arranged symmetrically about "
+                      "the blade like an object on an altar. The camera is square-on and slightly "
+                      "below, the hall receding into blackness on both sides, one shaft of light "
+                      "from far above striking the length of the steel. ") + LIGHT + OPTIC,
+}
+HUMAN_PICK = "low_hero"      # CHANGED from wide_forge after looking at all four. wide_forge had
+                             # the better light — a real shaft, a clean anvil silhouette — but its
+                             # sword was small and shapeless, and a cover for a song called STEEL
+                             # cannot have an illegible blade. low_hero is the one where the sword
+                             # is a sword: crossguard, grip and pommel all read, it runs corner to
+                             # corner, and the smoke fills the empty top half where a title goes.
+                             # It is also the better subject for the freeze — a bigger, clearer
+                             # blade is a bigger, cleaner mask.
+(WORK / "briefs.json").write_text(json.dumps(BRIEFS, indent=2))
+
+# ── the measuring instruments, at a pinned commit, proven before anything expensive runs ──
+TOOLS = TMP / "tools"; TOOLS.mkdir(exist_ok=True)
+for _f in ("stillness.py", "freeze.py"):
+    urllib.request.urlretrieve(
+        f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['tools_sha']}/lib/{_f}",
+        str(TOOLS / _f))
+sys.path.insert(0, str(TOOLS))
+import stillness as _S
+assert _S.selftest(), "the stillness instrument fails its own selftest — no number here is trustworthy"
 
 # ── the cover stages, each in its OWN PROCESS ────────────────────────────────────────────
 # Four runs died here and the mechanism was the same every time: this notebook's process keeps the
@@ -278,6 +354,7 @@ CFG = json.load(open("/tmp/aq_cfg.json"))
 PINS = CFG["pins"]; SEED = CFG["seed"]
 TMP = Path(CFG["tmp"]); WORK = Path(CFG["work"]); OUT = Path(CFG["out"])
 os.environ.update(HF_HOME=CFG["hf_home"], HF_HUB_ENABLE_HF_TRANSFER="1")
+sys.path.insert(0, CFG["tools"])
 T_START = time.time()
 
 def sh(c, quiet=False):
@@ -289,6 +366,16 @@ def sh(c, quiet=False):
 
 def clock(tag):
     print(f"  \u23f1 {tag} \u00b7 t+{(time.time()-T_START)/60:.1f} min", flush=True)
+
+def sha20(p):
+    # First 20 hex of a file's sha256. The GGUF experts are identified by CONTENT, not by name: a
+    # repo can move a tag under a filename and the notebook would never know.
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for c in iter(lambda: f.read(1 << 22), b""):
+            h.update(c)
+    return h.hexdigest()[:20]
+
 
 def drop_weights(*needles):
     # Delete a finished stage's weights from the cache. The three stages want ~13, ~31 and ~20 GB
@@ -317,250 +404,271 @@ NGPU = torch.cuda.device_count()
 print(f"[stage {sys.argv[1]}] torch {torch.__version__} \u00b7 {NGPU} gpu(s)", flush=True)
 
 
-def stage_still():
-    from PIL import Image
-    from huggingface_hub import hf_hub_download, snapshot_download
-    from diffusers import ZImagePipeline
-
-    ART_PROMPT = (
-        "A single forged steel sword lying across a bed of white-hot coals inside a dark blacksmith's "
-        "forge at night. The blade is freshly quenched, its edge still glowing orange along a "
-        "hardening line, the polished steel reflecting the fire. Fine sparks rise through the smoky "
-        "air. Heavy stone anvil and soot-blackened brick behind, deep shadow, one warm light source "
-        "from the coals below. Shot on a 85mm lens at f/2, shallow depth of field, volumetric haze, "
-        "photorealistic, cinematic colour grade, ultra sharp detail on the blade, album cover.")
-    ART_NEG = ("cartoon, illustration, painting, cgi render, plastic, blurry, low detail, watermark, "
-               "text, signature, extra swords, hands, people, oversaturated, orange filter")
-    IMAGE_REV = PINS["image"][1]
-    img_pipe = ZImagePipeline.from_pretrained(PINS["image"][0], revision=IMAGE_REV, torch_dtype=torch.bfloat16)
-    img_pipe.enable_sequential_cpu_offload()
-    if hasattr(img_pipe, "vae"):
-        img_pipe.vae.enable_tiling()
-    STILL_SEEDS, HUMAN_PICK = [SEED, 5150, 6270, 7380], 6270
-    t0 = time.time(); stills = []
-    for seed in STILL_SEEDS:
-        im = img_pipe(prompt=ART_PROMPT, negative_prompt=ART_NEG, width=896, height=896,
-                      num_inference_steps=9, guidance_scale=0.0,
-                      generator=torch.Generator(device="cuda").manual_seed(seed)).images[0]
-        p = OUT / f"still_{seed}.png"; im.save(p)
+def _score_and_save(imgs, model_used, repo="", rev=""):
+    rec = {"model": model_used, "image_repo": repo, "image_revision": rev,
+           "candidates": {}}
+    for name, im in imgs.items():
+        f = OUT / f"still_{name}.png"; im.save(f)
         a = np.asarray(im.convert("RGB"), dtype=np.float32) / 255
         g = a.mean(-1); gy, gx = np.gradient(g)
-        stills.append({"seed": seed, "file": p.name,
-                       "detail": round(float(np.sqrt(gx**2 + gy**2).mean() * 255), 2),
-                       "warm": round(float((a[..., 0] - a[..., 2]).clip(0).mean() * 255), 2),
-                       "dark_frac": round(float((g < 0.25).mean()), 3)})
-        print(f"  still seed {seed}: {stills[-1]}", flush=True)
-    print(f"{len(stills)} stills in {time.time()-t0:.0f}s", flush=True)
-    scorer_pick = max(stills, key=lambda c: c["detail"] * (1 + c["warm"] / 40) * (0.5 + c["dark_frac"]))
-    pick = next((c for c in stills if c["seed"] == HUMAN_PICK), scorer_pick)
-    (WORK / "stills.json").write_text(json.dumps({"candidates": stills, "scorer_pick": scorer_pick,
-        "human_pick": HUMAN_PICK, "shipped": pick, "image_revision": IMAGE_REV}, indent=2))
-    shutil.copy(OUT / pick["file"], OUT / "cover.png")
+        rec["candidates"][name] = {
+            "file": f.name,
+            "detail": round(float(np.sqrt(gx**2 + gy**2).mean() * 255), 2),
+            "warm": round(float((a[..., 0] - a[..., 2]).clip(0).mean() * 255), 2),
+            "dark_frac": round(float((g < 0.25).mean()), 3),
+            "contrast": round(float(g.std() * 255), 2)}
+    # A BLANK IMAGE IS NOT A RESULT. Four pure-black frames were scored (contrast 0.0, dark 1.0),
+    # written, upscaled to 3000px and shipped, because the numbers were recorded and nothing was
+    # ever compared against them. Refuse here, where the evidence is.
+    dead = [n for n, c in rec["candidates"].items() if c["contrast"] < 2.0 or c["dark_frac"] > 0.995]
+    if dead:
+        raise RuntimeError(f"{len(dead)} of {len(imgs)} stills are blank ({', '.join(dead)}) — "
+                           f"contrast {[rec['candidates'][n]['contrast'] for n in dead]}. "
+                           f"This model is producing nothing; refusing to ship it.")
+    pick = CFG["human_pick"] if CFG["human_pick"] in imgs else list(imgs)[0]
+    rec["shipped"] = pick
+    imgs[pick].save(OUT / "cover.png")
     sh(f"ffmpeg -v error -i '{OUT}/cover.png' -vf scale=3000:3000:flags=lanczos '{OUT}/cover_3000.png' -y", quiet=True)
-    print("cover still:", pick, "(scorer preferred", scorer_pick["seed"], ")", flush=True)
-    del img_pipe
+    (WORK / "stills.json").write_text(json.dumps(rec, indent=2))
+    print("STILL:", json.dumps(rec)[:500], flush=True)
+
+
+def stage_still():
+    # Z-Image BASE, not Turbo: base takes a real negative prompt and real CFG, which Turbo cannot,
+    # and that is most of the difference between a catalogue frame and a directed one.
+    from diffusers import ZImagePipeline
+    # TURBO, not base. Base is the better model — real CFG, real negative prompts — and on this
+    # hardware it rendered at 56 SECONDS A STEP: two stills in an hour, then the stage timed out.
+    # bf16 has no hardware path here and sequential offload streams every submodule, and those two
+    # costs multiply. Turbo is 8 steps with no CFG, which is 8x less work again, and it is the
+    # configuration that has actually produced four usable stills on a Kaggle card.
+    repo, rev = PINS["image_turbo"]
+    # bfloat16, NOT float16: in fp16 this model emits PURE BLACK — it did exactly that here, four
+    # images of min 0 max 0, and the run shipped them because nothing looked. Neither Kaggle card
+    # has bf16 in hardware so it is emulated and slower, but a slow correct image beats a fast
+    # black one. The VAE stays fp32 for the same reason.
+    pipe = ZImagePipeline.from_pretrained(repo, revision=rev, torch_dtype=torch.bfloat16)
+    # NOT resident: a 12.3 GB transformer plus an 8 GB text encoder do not fit a 15 GB T4 — that is
+    # what OOM'd this stage on a 76 MB allocation. Offload keeps one component on the card.
+    # SEQUENTIAL, not model, offload: bf16 has no hardware path on either Kaggle card, so torch
+    # runs those matmuls in fp32 and the activations are twice what they look — model offload still
+    # OOM'd on a 3.75 GB allocation. Sequential streams one submodule at a time, which is the
+    # configuration that actually rendered four stills on this hardware before.
+    pipe.enable_sequential_cpu_offload()
+    pipe.vae.to(torch.float32)
+    if hasattr(pipe, "enable_attention_slicing"): pipe.enable_attention_slicing("auto")
+    if hasattr(pipe, "enable_vae_tiling"): pipe.enable_vae_tiling()
+    print("  Z-Image Turbo ready (bf16, sequential offload, attention slicing)", flush=True)
+    imgs = {}
+    for name, brief in CFG["briefs"].items():
+        t0 = time.time()
+        imgs[name] = pipe(prompt=brief, height=896, width=896,
+                          num_inference_steps=9, guidance_scale=0.0,
+                          generator=torch.Generator("cuda:0").manual_seed(SEED)).images[0]
+        print(f"  {name}: {time.time()-t0:.0f}s", flush=True)
+    _score_and_save(imgs, f"Z-Image Turbo ({repo})", repo, rev)
     drop_weights("Z-Image")
 
 
 def stage_loop():
-    import ftfy, html
+    import freeze as F
+    import stillness as S
+    from diffusers import (AutoencoderKLWan, FlowMatchEulerDiscreteScheduler,
+                           GGUFQuantizationConfig, WanImageToVideoPipeline, WanTransformer3DModel)
     from transformers import AutoTokenizer, UMT5EncoderModel
-    from diffusers import (AutoencoderKLWan, FlowMatchEulerDiscreteScheduler, GGUFQuantizationConfig,
-                           WanImageToVideoPipeline, WanTransformer3DModel)
+    import ftfy, html
 
-    FPS, NF, STEPS, XF = 16, 81, 4, 6
-    WAN_BASE, WAN_BASE_REV = PINS["wan_base"]; WAN_GGUF, WAN_GGUF_REV = PINS["wan_gguf"]
-    BASE = snapshot_download(WAN_BASE, revision=WAN_BASE_REV,
+    still = np.asarray(Image.open(OUT / "cover.png").convert("RGB"), dtype=np.uint8)
+    W = H = 640
+    small = np.asarray(Image.fromarray(still).resize((W, H), Image.LANCZOS), dtype=np.uint8)
+
+    # The masks. Everything the operator's complaint depends on lives in these three lines: the
+    # sword is found by connectivity and elongation (colour alone claimed 20% of the frame), the
+    # grip and pommel are caught by extending along the sword's own axis, and the plate is the
+    # still with the sword painted out so the model has nothing to deform.
+    blade = F.steel_mask(small)
+    sword = F.feather(F.extend_along_axis(blade, small), 3) > 0.3
+    coals = F.fire_mask(small, plume=25)
+    plate = F.clean_plate(small, sword, grow=8)
+    Image.fromarray(plate).save(OUT / "clean_plate.png")
+    prev = small.copy(); prev[sword] = (0.35 * prev[sword] + np.array([0, 0, 170])).clip(0, 255)
+    Image.fromarray(np.concatenate([small, prev.astype(np.uint8), plate], 1)).save(OUT / "mask_check.jpg")
+    print(f"  sword mask {100*sword.mean():.1f}% · coals {100*coals.mean():.1f}%", flush=True)
+
+    base, brev = PINS["wan_base"]; gg, grev = PINS["wan_gguf"]
+    BASE = snapshot_download(base, revision=brev,
                              allow_patterns=["model_index.json", "scheduler/*", "vae/*", "tokenizer/*",
                                              "text_encoder/*", "transformer/config.json",
                                              "transformer_2/config.json"])
-    HIGH = hf_hub_download(WAN_GGUF, PINS["wan_high"], revision=WAN_GGUF_REV)
-    LOW = hf_hub_download(WAN_GGUF, PINS["wan_low"], revision=WAN_GGUF_REV)
+    HIGH = hf_hub_download(gg, PINS["wan_high"], revision=grev)
+    LOW = hf_hub_download(gg, PINS["wan_low"], revision=grev)
+    hashes = {"high": sha20(HIGH), "low": sha20(LOW)}
+    print("  wan sha256:", hashes, flush=True)
 
-    def sha_of(p, n=20):
-        h = hashlib.sha256()
-        with open(p, "rb") as f:
-            for c in iter(lambda: f.read(1 << 22), b""):
-                h.update(c)
-        return h.hexdigest()[:n]
-    WAN_HASHES = {"high_noise_gguf": sha_of(HIGH), "low_noise_gguf": sha_of(LOW),
-                  "vae": sha_of(f"{BASE}/vae/diffusion_pytorch_model.safetensors")}
-    print("wan sha256:", WAN_HASHES, flush=True)
+    PROMPT = ("Photograph, locked-off tripod shot of a blacksmith's forge at night. A bed of coals "
+              "burns hard in a stone hearth: flames lick and flare up between the coals, the embers "
+              "surge and dim as the fire breathes, sparks fly upward in bursts, smoke billows and "
+              "rolls through the air above, heat haze boils over the whole bed. Vigorous, restless "
+              "fire. The camera is locked off and does not move. Cinematic, photorealistic, film grain.")
+    NEG = ("camera movement, pan, zoom, dolly, handheld shake, cut, scene change, morphing, melting, "
+           "people, hands, text, watermark, blurry, low quality, oversaturated, cartoon, flicker")
 
-    LOOP_PROMPT = ("Photograph, locked-off tripod shot, a dark blacksmith's forge at night. A polished steel "
-                   "sword lies across a bed of glowing orange coals in a stone hearth; an iron anvil stands "
-                   "behind it. Subtle, continuous, natural motion only: heat haze shimmers above the coals, "
-                   "the embers pulse and breathe with a slow orange glow, thin grey smoke drifts and curls "
-                   "gently in place, warm firelight flickers softly across the blade and the anvil. The "
-                   "blade, the hearth and the camera stay perfectly still. Cinematic, photorealistic, "
-                   "shallow depth of field, fine film grain. The motion is gentle and steady and the scene "
-                   "returns to exactly where it began, looping seamlessly.")
-    LOOP_NEG = ("camera movement, pan, zoom, dolly, handheld shake, cut, scene change, morphing, deformed "
-                "blade, blade moving, extra objects, people, hands, text, watermark, subtitles, blurry, low "
-                "quality, JPEG artifacts, overexposed, oversaturated, cartoon, painting, flicker, jitter")
+    def clean(t):
+        return re.sub(r"\s+", " ", html.unescape(html.unescape(ftfy.fix_text(t)))).strip()
 
-    def prompt_clean(t):
-        t = html.unescape(html.unescape(ftfy.fix_text(t)))
-        return re.sub(r"\s+", " ", t).strip()
-
-    # umT5-XXL (11.4 GB bf16) is encoded first and freed — it and an expert cannot share a card.
     tok = AutoTokenizer.from_pretrained(BASE, subfolder="tokenizer")
-    te = UMT5EncoderModel.from_pretrained(BASE, subfolder="text_encoder", torch_dtype=torch.bfloat16).to("cuda:0").eval()
-    def embed(text, max_len=512):
-        ids = tok([prompt_clean(text)], padding="max_length", max_length=max_len, truncation=True,
+    te = UMT5EncoderModel.from_pretrained(BASE, subfolder="text_encoder",
+                                          torch_dtype=torch.bfloat16).to("cuda:0").eval()
+    def embed(t, n=512):
+        ids = tok([clean(t)], padding="max_length", max_length=n, truncation=True,
                   add_special_tokens=True, return_attention_mask=True, return_tensors="pt")
-        n = int(ids.attention_mask.gt(0).sum(dim=1)[0])
+        k = int(ids.attention_mask.gt(0).sum(1)[0])
         with torch.no_grad():
             h = te(ids.input_ids.to("cuda:0"), ids.attention_mask.to("cuda:0")).last_hidden_state[0].float().cpu()
-        return torch.cat([h[:n], h.new_zeros(max_len - n, h.size(1))])[None]
-    PE, NE = embed(LOOP_PROMPT), embed(LOOP_NEG)
-    assert torch.isfinite(PE).all() and torch.isfinite(NE).all(), "text embeddings not finite"
-    PE, NE = PE.to("cuda:0"), NE.to("cuda:0")      # the pipeline casts their dtype but never moves them
+        return torch.cat([h[:k], h.new_zeros(n - k, h.size(1))])[None]
+    PE, NE = embed(PROMPT).to("cuda:0"), embed(NEG).to("cuda:0")
     del te; gc.collect(); torch.cuda.empty_cache()
 
-    class NaNLatent(RuntimeError):
-        pass
+    class Pinned(FlowMatchEulerDiscreteScheduler):
+        PRE = [1.0, 0.75, 0.5, 0.25]        # lightx2v's trained points under shift 5
+        def set_timesteps(self, num_inference_steps=None, device=None, sigmas=None, mu=None,
+                          timesteps=None):
+            return super().set_timesteps(device=device, sigmas=list(self.PRE))
 
-    class PinnedSigmas(FlowMatchEulerDiscreteScheduler):
-        PRE_SHIFT = [1.0, 0.75, 0.5, 0.25]      # -> [1.0, 0.9375, 0.8333, 0.625] after shift 5
-        def set_timesteps(self, num_inference_steps=None, device=None, sigmas=None, mu=None, timesteps=None):
-            return super().set_timesteps(device=device, sigmas=list(self.PRE_SHIFT))
+    q = GGUFQuantizationConfig(compute_dtype=torch.float16)
+    hi = WanTransformer3DModel.from_single_file(HIGH, quantization_config=q, config=BASE,
+                                                subfolder="transformer", torch_dtype=torch.float16)
+    lo = WanTransformer3DModel.from_single_file(LOW, quantization_config=q, config=BASE,
+                                                subfolder="transformer_2", torch_dtype=torch.float16)
+    vae = AutoencoderKLWan.from_pretrained(BASE, subfolder="vae", torch_dtype=torch.float32)
+    pipe = WanImageToVideoPipeline.from_pretrained(BASE, transformer=hi, transformer_2=lo, vae=vae,
+                                                   text_encoder=None, tokenizer=None,
+                                                   torch_dtype=torch.float16)
+    pipe.vae.enable_tiling()
+    if NGPU >= 2:
+        hi.to("cuda:0"); vae.to("cuda:0"); lo.to("cuda:1")
+        _f = lo.forward
+        def across(*a, **k):
+            a = [x.to("cuda:1") if torch.is_tensor(x) else x for x in a]
+            k = {n: (v.to("cuda:1") if torch.is_tensor(v) else v) for n, v in k.items()}
+            o = _f(*a, **k)
+            # The pipeline calls the transformer with return_dict=False, so this comes back as a
+            # TUPLE. An earlier version only moved the .sample attribute and passed tuples through
+            # untouched, which left the low-noise expert's prediction on cuda:1 — the run died at
+            # the 50% mark, exactly where the second expert takes over.
+            if isinstance(o, tuple):
+                return tuple(x.to("cuda:0") if torch.is_tensor(x) else x for x in o)
+            if torch.is_tensor(o):
+                return o.to("cuda:0")
+            return o.__class__(sample=o.sample.to("cuda:0"))
+        lo.forward = across
+        print("  one expert per card", flush=True)
+    else:
+        pipe.enable_model_cpu_offload()
+    pipe.scheduler = Pinned(shift=5.0)
 
-    def build_wan(dtype):
-        vae = AutoencoderKLWan.from_pretrained(BASE, subfolder="vae", torch_dtype=torch.float32)
-        q = GGUFQuantizationConfig(compute_dtype=dtype)
-        high = WanTransformer3DModel.from_single_file(HIGH, quantization_config=q, config=BASE,
-                                                      subfolder="transformer", torch_dtype=dtype)
-        low = WanTransformer3DModel.from_single_file(LOW, quantization_config=q, config=BASE,
-                                                     subfolder="transformer_2", torch_dtype=dtype)
-        p = WanImageToVideoPipeline.from_pretrained(BASE, transformer=high, transformer_2=low, vae=vae,
-                                                    text_encoder=None, tokenizer=None, torch_dtype=dtype)
-        p.vae.enable_tiling()
-        if NGPU >= 2:
-            high.to("cuda:0"); vae.to("cuda:0"); low.to("cuda:1")
-            _fwd = low.forward
-            def _across(*a, **k):
-                a = [x.to("cuda:1") if torch.is_tensor(x) else x for x in a]
-                k = {n: (v.to("cuda:1") if torch.is_tensor(v) else v) for n, v in k.items()}
-                out = _fwd(*a, **k)
-                if isinstance(out, tuple):
-                    return tuple(o.to("cuda:0") if torch.is_tensor(o) else o for o in out)
-                return out.__class__(sample=out.sample.to("cuda:0"))
-            low.forward = _across
-            print("wan placement: high-noise cuda:0 · low-noise cuda:1 · vae cuda:0", flush=True)
-        else:
-            p.enable_model_cpu_offload()
-            print("wan placement: one card, model offload", flush=True)
-        p.scheduler = PinnedSigmas(shift=5.0)
-        return p
-
-    def guard(pipe_, i, t, kw):
-        lat = kw["latents"]
-        if not torch.isfinite(lat).all():
-            raise NaNLatent(f"non-finite latents after step {i}")
-        print(f"    wan step {i} · t={float(t):.0f} · t+{(time.time()-T_START)/60:.1f} min", flush=True)
-        return {}
-
-    def decode_latents(pipe_, latents):
-        '''The pipeline's own decode, done explicitly after the experts are parked.'''
-        if NGPU < 2:
-            pipe_.transformer.to("cpu"); pipe_.transformer_2.to("cpu")
-            gc.collect(); torch.cuda.empty_cache()
-        vae = pipe_.vae.to("cuda:0")
-        lat = latents.to(vae.dtype)
-        mean = torch.tensor(vae.config.latents_mean).view(1, vae.config.z_dim, 1, 1, 1).to(lat.device, lat.dtype)
-        std = 1.0 / torch.tensor(vae.config.latents_std).view(1, vae.config.z_dim, 1, 1, 1).to(lat.device, lat.dtype)
-        lat = lat / std + mean
-        with torch.no_grad():
-            video = vae.decode(lat, return_dict=False)[0]
-        video = pipe_.video_processor.postprocess_video(video, output_type="np")[0]
-        return (np.clip(video, 0, 1) * 255).round().astype(np.uint8)
-
-    def gen_loop(pipe_, still, W, H, seed):
-        img = still.resize((W, H), Image.LANCZOS)          # square -> square, no distortion
-        g = torch.Generator(device="cuda:0").manual_seed(seed)
-        out = pipe_(image=img, last_image=img, prompt_embeds=PE, negative_prompt_embeds=NE,
-                    height=H, width=W, num_frames=NF, num_inference_steps=STEPS, guidance_scale=1.0,
-                    generator=g, output_type="latent", callback_on_step_end=guard)
-        frames = decode_latents(pipe_, out.frames)
-        return frames, np.asarray(img)
-
-    def measure_loop(path, w=256):
-        sh(f"ffmpeg -v error -i '{path}' -vf scale={w}:{w} -f rawvideo -pix_fmt rgb24 /tmp/v.rgb -y", quiet=True)
-        a = np.fromfile("/tmp/v.rgb", dtype=np.uint8).reshape(-1, w, w, 3).astype(np.float32) / 255
-        l = 0.2126 * a[..., 0] + 0.7152 * a[..., 1] + 0.0722 * a[..., 2]
-        per = np.abs(np.diff(l, axis=0)).reshape(len(a) - 1, -1).mean(1) * 255
-        wrap = float(np.abs(l[-1] - l[0]).mean() * 255); typical = float(np.percentile(per, 95))
-        return {"frames": int(len(a)), "cuts": int((np.abs(np.diff(l.reshape(len(a), -1).mean(1))) > 0.10).sum()),
-                "ti_mean": round(float(per.mean()), 2), "wrap_delta": round(wrap, 2),
-                "typical_frame_delta": round(typical, 2), "wrap_ratio": round(wrap / max(typical, 1e-6), 2),
-                "luma_mean": round(float(l.mean()), 3), "luma_std_min": round(float(l.std(axis=(1, 2)).min()), 4)}
-
-    def encode_loop(loop, base):
-        fdir = Path(f"/tmp/frames_{Path(base).name}"); fdir.mkdir(exist_ok=True)
-        for f in fdir.glob("*.png"): f.unlink()
-        for i, f in enumerate(loop):
-            Image.fromarray(f).save(fdir / f"{i:04d}.png")
-        raw = f"{base}_raw.mp4"
-        sh(f"ffmpeg -v error -framerate {FPS} -i '{fdir}/%04d.png' -c:v libx264 -crf 12 -preset slow -pix_fmt yuv420p '{raw}' -y", quiet=True)
-        sh(f"ffmpeg -v error -i '{raw}' -c:v libvpx-vp9 -crf 30 -b:v 0 -row-mt 1 -cpu-used 1 -g 240 -pix_fmt yuv420p -an '{base}.webm' -y", quiet=True)
-        sh(f"ffmpeg -v error -i '{raw}' -c:v libx264 -preset veryslow -crf 20 -pix_fmt yuv420p -movflags +faststart -an '{base}.mp4' -y", quiet=True)
-        sh(f"ffmpeg -v error -i '{raw}' -vf scale=1080:1080:flags=lanczos -c:v libvpx-vp9 -crf 33 -b:v 0 -row-mt 1 -cpu-used 1 -g 240 -pix_fmt yuv420p -an '{base}_1080.webm' -y", quiet=True)
-        return raw
-
-    from PIL import Image
-    still_img = Image.open(OUT / "cover.png").convert("RGB")
-    loop_rec, wan_pipe, wan_dtype = None, None, torch.float16
-    for size in (640, 576, 480):
-        W = H = size
-        for attempt in range(2):
-            try:
-                if wan_pipe is None:
-                    wan_pipe = build_wan(wan_dtype)
-                print(f"\n=== loop {size}² · {NF} frames · {STEPS} steps · {wan_dtype} ===", flush=True)
-                t0 = time.time()
-                frames, ref = gen_loop(wan_pipe, still_img, W, H, SEED)
-                gen_s = time.time() - t0
-                L = frames[:-1]                                     # drop the duplicated pinned frame
-                w_ = (np.arange(1, XF + 1) / (XF + 1))[:, None, None, None]
-                blend = ((1 - w_) * L[-XF:].astype(np.float32) + w_ * L[:XF].astype(np.float32)).round().astype(np.uint8)
-                XL = np.concatenate([L[XF:len(L) - XF], blend])     # the dissolve loop
-                raw_xf = encode_loop(XL, str(OUT / "STEEL_cover_loop"))
-                encode_loop(L, str(OUT / "STEEL_cover_loop_cut"))
-                idx = np.linspace(0, len(XL) - 1, 8).round().astype(int)
-                Image.fromarray(np.concatenate([XL[i] for i in idx], axis=1)).save(OUT / "STEEL_cover_loop_sheet.jpg", quality=88)
-                Image.fromarray(np.concatenate([XL[i] for i in (-3, -2, -1, 0, 1, 2)], axis=1)).save(OUT / "STEEL_cover_loop_seam.jpg", quality=90)
-                ref_f = ref.astype(np.float32)
-                loop_rec = {"model": "Wan2.2-I2V-A14B lightx2v-4step Q4_K_M (jayn7 GGUF)", "hashes": WAN_HASHES,
-                            "closure": f"first==last frame pinned (last_image); delivered as a {XF}-frame dissolve of tail into head; hard cut beside it",
-                            "dtype": str(wan_dtype).replace("torch.", ""), "res": [W, H], "fps": FPS,
-                            "gen_seconds": round(gen_s, 1), "seed": SEED, "prompt": LOOP_PROMPT,
-                            "pin_mae_first": round(float(np.abs(frames[0].astype(np.float32) - ref_f).mean()), 2),
-                            "pin_mae_last": round(float(np.abs(frames[-1].astype(np.float32) - ref_f).mean()), 2),
-                            "dissolve": measure_loop(str(OUT / "STEEL_cover_loop.webm")),
-                            "cut": measure_loop(str(OUT / "STEEL_cover_loop_cut.webm"))}
-                (WORK / "loop_verify.json").write_text(json.dumps(loop_rec, indent=2))
-                print("LOOP:", json.dumps(loop_rec["dissolve"]), flush=True)
-                for f in (OUT / "STEEL_cover_loop_cut_raw.mp4",):
-                    f.unlink(missing_ok=True)
-                break
-            except NaNLatent as e:
-                print(f"loop {size}: {e}", flush=True)
-                if wan_dtype is torch.float32:
-                    break
-                del wan_pipe; wan_pipe = None; gc.collect(); torch.cuda.empty_cache(); wan_dtype = torch.float32
-                print("  rebuilding the animator in fp32", flush=True)
-            except torch.cuda.OutOfMemoryError as e:
-                print(f"loop {size}: OOM — {str(e)[:200]}", flush=True)
-                gc.collect(); torch.cuda.empty_cache(); break
-            except Exception as e:                       # anything else at this size: step down, recorded
-                print(f"loop {size}: {type(e).__name__}: {str(e)[:300]}", flush=True)
-                gc.collect(); torch.cuda.empty_cache(); break
-        if loop_rec:
-            break
-    assert loop_rec, "no loop was produced at any size"
+    # NO FIRST==LAST PIN. Pinning the same frame at both ends is what makes an unedited clip loop,
+    # and it costs motion: the model spends the clip returning to where it started. Measured, that
+    # bill came due — the raw generation moved 0.35 against 1.70 for the loop that looked alive, so
+    # the fire was nearly static before any compositing touched it. Here the wrap is closed by the
+    # dissolve instead, and the sword is held still by the composite rather than by the sampler, so
+    # nothing needs the pin any more and the fire is free to burn.
+    NF, FPS, XF = 81, 16, 8
+    img = Image.fromarray(plate)
+    t0 = time.time()
+    out = pipe(image=img, prompt_embeds=PE, negative_prompt_embeds=NE,
+               height=H, width=W, num_frames=NF, num_inference_steps=4, guidance_scale=1.0,
+               generator=torch.Generator("cuda:0").manual_seed(SEED), output_type="latent")
+    if NGPU < 2:
+        pipe.transformer.to("cpu"); pipe.transformer_2.to("cpu")
+        gc.collect(); torch.cuda.empty_cache()
+    v = pipe.vae.to("cuda:0")
+    lat = out.frames.to(v.dtype)
+    mean = torch.tensor(v.config.latents_mean).view(1, v.config.z_dim, 1, 1, 1).to(lat.device, lat.dtype)
+    std = 1.0 / torch.tensor(v.config.latents_std).view(1, v.config.z_dim, 1, 1, 1).to(lat.device, lat.dtype)
+    with torch.no_grad():
+        dec = v.decode(lat / std + mean, return_dict=False)[0]
+    frames = (np.clip(pipe.video_processor.postprocess_video(dec, output_type="np")[0], 0, 1) * 255).round().astype(np.uint8)
+    gen_s = time.time() - t0
+    print(f"  {len(frames)} frames in {gen_s:.0f}s", flush=True)
+    del pipe, hi, lo; gc.collect(); torch.cuda.empty_cache()
     drop_weights("Wan-AI", "jayn7")
 
+    # Freeze the sword back in, lit by the fire the model made — and let the MEASUREMENT choose
+    # how hard to light it. Take eight was refused for changing 10.35 grey levels while its blade
+    # sat at 0.0 px drift: the firelight the liveness gate demands is the same firelight the
+    # stillness gate was counting as movement. Rather than pick a number and hope, walk the ladder
+    # from the most firelight to the least and keep the FIRST rung that satisfies both gates at
+    # once. The whole ladder is published, so the choice can be checked rather than trusted.
+    def build(clip):
+        lit = F.freeze_lit(frames, small, sword, coals, radius=3, clip=clip)
+        L = lit[:-1]
+        w = (np.arange(1, XF + 1) / (XF + 1))[:, None, None, None]
+        blend = ((1 - w) * L[-XF:].astype(np.float32) + w * L[:XF].astype(np.float32)).round().astype(np.uint8)
+        return np.concatenate([L[XF:len(L) - XF], blend])
+
+    LADDER = [(0.7, 1.55), (0.8, 1.35), (0.85, 1.25), (0.9, 1.18), (0.93, 1.12)]
+    rungs, loop, chosen = [], None, None
+    for clip in LADDER:
+        cand = build(clip)
+        g = cand.astype(np.float32).mean(3)
+        lum = np.array([f[blade].mean() for f in g])
+        row = {"clip": list(clip),
+               "lit_dev": round(max(S._lit_deviation(g, blade)), 2),
+               "max_dev": round(max(float(np.abs(f[blade] - g[0][blade]).mean()) for f in g), 2),
+               "subject_light_std": round(float(lum.std()), 2),
+               "fire_motion": round(float(np.abs(np.diff(g, axis=0))[:, coals].mean()), 2)}
+        # BOTH instruments, deliberately. `lit_dev` is the honest one — it removes a smooth
+        # lighting field before judging, so it cannot mistake firelight for movement. `max_dev` is
+        # the older, blunter number that CAN, and it is kept here as a ladder criterion (never as
+        # a gate) for one reason: a rung that satisfies both is a rung whose acceptance does not
+        # depend on my having repaired the instrument. The strongest firelight is worth less than
+        # a result that stands under the measurement that refused take eight.
+        still_ok = row["lit_dev"] <= S.LIMIT["lit_dev"] and row["max_dev"] <= 6.0
+        alive_ok = (row["subject_light_std"] >= S.ALIVE["subject_light_std"]
+                    and row["fire_motion"] >= S.ALIVE["fire_motion"])
+        row["passes"] = bool(still_ok and alive_ok)
+        rungs.append(row)
+        print(f"  relight {str(clip):12s} lit_dev {row['lit_dev']:5.2f} · light {row['subject_light_std']:5.2f}"
+              f" · fire {row['fire_motion']:5.2f} -> {'take it' if row['passes'] else 'no'}", flush=True)
+        if row["passes"]:
+            loop, chosen = cand, list(clip)
+            break
+    assert loop is not None, ("no relight strength satisfies both gates — the still's coals may be "
+                              "too dim to light the blade at all; the ladder is above")
+
+    def encode(fr, base):
+        d = Path(f"/tmp/f_{Path(base).name}"); d.mkdir(exist_ok=True)
+        for f in d.glob("*.png"): f.unlink()
+        for i, f in enumerate(fr): Image.fromarray(f).save(d / f"{i:04d}.png")
+        sh(f"ffmpeg -v error -framerate {FPS} -i '{d}/%04d.png' -c:v libx264 -crf 12 -preset slow "
+           f"-pix_fmt yuv420p '{base}_raw.mp4' -y", quiet=True)
+        sh(f"ffmpeg -v error -i '{base}_raw.mp4' -c:v libvpx-vp9 -crf 30 -b:v 0 -row-mt 1 -cpu-used 1 "
+           f"-g 240 -pix_fmt yuv420p -an '{base}.webm' -y", quiet=True)
+        sh(f"ffmpeg -v error -i '{base}_raw.mp4' -c:v libx264 -preset veryslow -crf 20 -pix_fmt yuv420p "
+           f"-movflags +faststart -an '{base}.mp4' -y", quiet=True)
+        sh(f"ffmpeg -v error -i '{base}_raw.mp4' -vf scale=1080:1080:flags=lanczos -c:v libvpx-vp9 "
+           f"-crf 33 -b:v 0 -row-mt 1 -cpu-used 1 -pix_fmt yuv420p -an '{base}_1080.webm' -y", quiet=True)
+
+    encode(loop, str(OUT / "STEEL_cover_loop"))
+    encode(np.concatenate([frames[:-1]]), str(OUT / "STEEL_cover_loop_unfrozen"))   # the comparison
+    idx = np.linspace(0, len(loop) - 1, 8).round().astype(int)
+    Image.fromarray(np.concatenate([loop[i] for i in idx], 1)).save(OUT / "loop_sheet.jpg", quality=88)
+    Image.fromarray(np.concatenate([loop[i] for i in (-3, -2, -1, 0, 1, 2)], 1)).save(OUT / "loop_seam.jpg", quality=90)
+
+    rec = {"model": "Wan2.2-I2V-A14B lightx2v-4step Q4_K_M", "hashes": hashes, "seed": SEED,
+           "frames": int(len(loop)), "fps": FPS, "gen_seconds": round(gen_s, 1),
+           "method": "sword painted out of the still; the plate animated; the sword composited back "
+                     "frozen and re-lit per frame from the coals",
+           "sword_mask_pct": round(100 * float(sword.mean()), 2),
+           "relight_clip": chosen, "relight_ladder": rungs,
+           "frozen": S.measure(str(OUT / "STEEL_cover_loop.webm"), mask=blade),
+           "unfrozen": S.measure(str(OUT / "STEEL_cover_loop_unfrozen.webm"), mask=blade),
+           "alive": S.liveness(str(OUT / "STEEL_cover_loop.webm"), coals, blade)}
+    rec["verdict_still"] = S.verdict(rec["frozen"])
+    rec["verdict_alive"] = S.liveness_verdict(rec["alive"])
+    (WORK / "loop_verify.json").write_text(json.dumps(rec, indent=2))
+    print("LOOP:", json.dumps(rec), flush=True)
 
 if __name__ == "__main__":
     {"still": stage_still, "loop": stage_loop}[sys.argv[1]]()
@@ -570,7 +678,8 @@ if __name__ == "__main__":
 Path("/tmp/aq_stage.py").write_text(STAGE_SRC)
 Path("/tmp/aq_cfg.json").write_text(json.dumps({
     "pins": {k: (list(v) if isinstance(v, tuple) else v) for k, v in PINS.items()},
-    "seed": SEED, "tmp": str(TMP), "work": str(WORK), "out": str(OUT), "hf_home": str(TMP / "hf")}))
+    "seed": SEED, "tmp": str(TMP), "work": str(WORK), "out": str(OUT), "hf_home": str(TMP / "hf"),
+    "tools": str(TOOLS), "briefs": BRIEFS, "human_pick": HUMAN_PICK}))
 
 def run_stage(name, minutes):
     t0 = time.time()
@@ -587,7 +696,13 @@ clock("still chosen")
 
 assert run_stage("loop", 180) == 0, "the loop stage failed — see its output above"
 loop_rec = json.loads((WORK / "loop_verify.json").read_text())
-print("LOOP:", json.dumps(loop_rec["dissolve"]), flush=True)
+print("LOOP frozen:", json.dumps(loop_rec["frozen"]), flush=True)
+print("LOOP alive :", json.dumps(loop_rec["alive"]), flush=True)
+# THE GATES BLOCK HERE, NOT IN THE STAGE. A cover whose subject wanders, or whose fire is dead, is
+# not a cover — and the previous record shipped one because every number it printed was a
+# whole-frame average that could not see a 3% blade.
+assert not loop_rec["verdict_still"], "the blade moves: " + "; ".join(loop_rec["verdict_still"])
+assert not loop_rec["verdict_alive"], "the loop is dead: " + "; ".join(loop_rec["verdict_alive"])
 clock("loop delivered")
 release("before the song")
 
@@ -1013,11 +1128,15 @@ tp = Lm.get("true_peak_dbtp")
 if tp is not None and tp > TARGET_TP + 0.05: problems.append(f"true peak {tp} dBTP over target")
 if rep.get("seconds") and abs(rep["seconds"] - DURATION) > 5:
     problems.append(f"duration {rep['seconds']}s vs {DURATION}s")
-lp = loop_rec["dissolve"]
-if lp["cuts"]: problems.append(f"the cover loop cuts ({lp['cuts']})")
-if lp["wrap_ratio"] >= 1.5: problems.append(f"loop wrap visible: ratio {lp['wrap_ratio']}")
-if lp["ti_mean"] < 0.3: problems.append("the cover loop does not move")
-if lp["luma_std_min"] < 0.01 or lp["luma_mean"] < 0.02: problems.append("the cover loop has black frames")
+# THE COVER, JUDGED INSIDE THE SUBJECT'S OWN MASK. What used to be here were four whole-frame
+# luma statistics — cuts, wrap ratio, mean motion, black frames — and a cover shipped that passed
+# every one of them with a blade that drifted 18 px, because a global average cannot see a subject
+# occupying 3% of the picture. These are the same numbers the loop stage gates on, restated here so
+# the finished record refuses to assemble around a cover that failed.
+problems += [f"the cover loop: {x}" for x in loop_rec["verdict_still"]]
+problems += [f"the cover loop: {x}" for x in loop_rec["verdict_alive"]]
+if loop_rec["frozen"]["ratio"] >= 1.0:
+    problems.append(f"the blade moves more than the frame around it ({loop_rec['frozen']['ratio']}x)")
 verify["problems"] = problems
 verify["disclosure"] = (f"male lead: median {reg.get('f0_hz')} Hz, lead mode {reg.get('lead_hz')} Hz "
                         f"carrying {reg.get('lead_frac')} of voiced frames, spread {reg.get('spread_st')} st, "
