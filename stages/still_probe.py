@@ -86,16 +86,43 @@ NEG = ("charcoal briquettes, barbecue, uniform round lumps, video game render, p
 
 # %%
 from diffusers import ZImagePipeline
+import gc
 pipe = ZImagePipeline.from_pretrained(REPO, revision=REV, torch_dtype=torch.bfloat16)
-pipe.text_encoder.to("cuda:0")
-embeds = {}
-for name, brief in BRIEFS.items():
-    pe, ne = pipe.encode_prompt(prompt=brief, device=torch.device("cuda:0"),
-                                do_classifier_free_guidance=True, negative_prompt=NEG)
-    embeds[name] = ([t.detach().cpu() for t in pe], [t.detach().cpu() for t in ne])
-    print(f"  embedded {name}", flush=True)
+
+# THE TEXT ENCODER IN fp16, NOT bf16. Qwen3-4B is 7.5 GB of weights on a 14.56 GiB card, which
+# ought to leave room — and in bf16 it OOM'd needing another 32 MiB, with 14.28 GiB already
+# allocated, inside its own self-attention. Neither Kaggle card has bf16 in hardware, so the
+# memory-efficient attention kernels (fp16/fp32 only below sm_80) are unavailable and torch falls
+# back to a math path that upcasts. fp16 has a hardware path here. If it OOMs anyway, stream it:
+# encoding happens once and slowness there costs a few minutes, while the DENOISER is what needs
+# to be resident.
+MAXLEN = 320                        # the briefs are ~150 tokens; 512 pads activations for nothing
+def encode_all(device):
+    out = {}
+    for name, brief in BRIEFS.items():
+        pe, ne = pipe.encode_prompt(prompt=brief, device=torch.device(device),
+                                    do_classifier_free_guidance=True, negative_prompt=NEG,
+                                    max_sequence_length=MAXLEN)
+        out[name] = ([t.detach().cpu() for t in pe], [t.detach().cpu() for t in ne])
+        print(f"  embedded {name}", flush=True)
+    return out
+
+ENC = "cuda:1" if torch.cuda.device_count() >= 2 else "cuda:0"
+try:
+    pipe.text_encoder.to(ENC, torch.float16)
+    print(f"  text encoder fp16 on {ENC}", flush=True)
+    embeds = encode_all(ENC)
+    how_encoded = f"fp16 resident on {ENC}"
+except torch.cuda.OutOfMemoryError:
+    print("  fp16 resident OOM'd — streaming the encoder from host instead", flush=True)
+    pipe.text_encoder.to("cpu", torch.float32); gc.collect(); torch.cuda.empty_cache()
+    from accelerate import cpu_offload
+    cpu_offload(pipe.text_encoder, execution_device=torch.device(ENC))
+    embeds = encode_all(ENC)
+    how_encoded = f"streamed from host to {ENC}"
+print(f"  prompts encoded ({how_encoded})", flush=True)
 pipe.text_encoder.to("cpu"); del pipe.text_encoder; pipe.text_encoder = None
-import gc; gc.collect(); torch.cuda.empty_cache()
+gc.collect(); torch.cuda.empty_cache()
 
 NG = torch.cuda.device_count()
 DEC = "cuda:1" if NG >= 2 else "cuda:0"
@@ -136,6 +163,7 @@ assert per_step * STEPS * 4 / 60 < BUDGET_MIN, (
 
 # %%
 rec = {"model": f"Z-Image base ({REPO})", "revision": REV, "steps": STEPS, "guidance": 5.0,
+       "encoded": how_encoded,
        "seconds_per_step": round(per_step, 2), "candidates": {}}
 for name in BRIEFS:
     t0 = time.time(); im = render(name, STEPS)

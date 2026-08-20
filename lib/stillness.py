@@ -89,16 +89,25 @@ def _lit_deviation(g, mask, sigma=None):
 
 
 def _blur(a, sigma):
-    """Separable box-cascade gaussian — three passes, numpy only (no scipy on the kernel)."""
+    """Separable box-cascade gaussian — three passes, numpy only (no scipy on the kernel).
+
+    Summed-area, not convolution. The first version ran `np.apply_along_axis` with `np.convolve`,
+    which is a Python-level loop over every row and every column: ~3,800 calls per blur, and the
+    relight ladder wants one blur per frame per rung. A running sum differences in O(n) with no
+    Python loop at all and gives the same box filter exactly.
+    """
     r = max(1, int(round(sigma * 0.9)))
-    k = np.ones(2 * r + 1, dtype=np.float32) / (2 * r + 1)
     out = np.asarray(a, dtype=np.float32)
+    w = 2 * r + 1
     for _ in range(3):
         for ax in (0, 1):
             pad = [(0, 0)] * out.ndim
-            pad[ax] = (r, r)
+            pad[ax] = (r + 1, r)
             q = np.pad(out, pad, mode="edge")
-            out = np.apply_along_axis(lambda v: np.convolve(v, k, "valid"), ax, q)
+            c = np.cumsum(q, axis=ax)
+            hi = np.take(c, np.arange(w, c.shape[ax]), axis=ax)
+            lo = np.take(c, np.arange(0, c.shape[ax] - w), axis=ax)
+            out = (hi - lo) / w
     return out
 
 
