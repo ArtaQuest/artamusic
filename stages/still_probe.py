@@ -97,29 +97,30 @@ pipe = ZImagePipeline.from_pretrained(REPO, revision=REV, torch_dtype=torch.bflo
 # encoding happens once and slowness there costs a few minutes, while the DENOISER is what needs
 # to be resident.
 MAXLEN = 320                        # the briefs are ~150 tokens; 512 pads activations for nothing
-def encode_all(device):
-    out = {}
+
+# UNDER inference_mode, AND FREED BETWEEN PROMPTS. The fp16 encoder embedded the FIRST brief and
+# then OOM'd on the second, which is not a model-too-big failure — it is accumulation. The
+# pipeline's __call__ carries the no-grad decorator; `encode_prompt` called on its own does not, so
+# every one of the 36 layers' activations was being kept alive for a backward pass that never
+# comes. Wrapping the call is the fix; dropping the GPU copies as soon as they are on the host is
+# the belt to its braces. (There is no point falling back to a streamed encoder after an OOM: the
+# traceback itself holds references to the tensors that filled the card, which is exactly why the
+# fallback then OOM'd too.)
+ENC = "cuda:1" if torch.cuda.device_count() >= 2 else "cuda:0"
+pipe.text_encoder.to(ENC, torch.float16)
+print(f"  text encoder fp16 on {ENC} · {torch.cuda.memory_allocated(1 if ENC.endswith('1') else 0)/2**30:.1f} GB", flush=True)
+embeds = {}
+with torch.inference_mode():
     for name, brief in BRIEFS.items():
-        pe, ne = pipe.encode_prompt(prompt=brief, device=torch.device(device),
+        pe, ne = pipe.encode_prompt(prompt=brief, device=torch.device(ENC),
                                     do_classifier_free_guidance=True, negative_prompt=NEG,
                                     max_sequence_length=MAXLEN)
-        out[name] = ([t.detach().cpu() for t in pe], [t.detach().cpu() for t in ne])
-        print(f"  embedded {name}", flush=True)
-    return out
-
-ENC = "cuda:1" if torch.cuda.device_count() >= 2 else "cuda:0"
-try:
-    pipe.text_encoder.to(ENC, torch.float16)
-    print(f"  text encoder fp16 on {ENC}", flush=True)
-    embeds = encode_all(ENC)
-    how_encoded = f"fp16 resident on {ENC}"
-except torch.cuda.OutOfMemoryError:
-    print("  fp16 resident OOM'd — streaming the encoder from host instead", flush=True)
-    pipe.text_encoder.to("cpu", torch.float32); gc.collect(); torch.cuda.empty_cache()
-    from accelerate import cpu_offload
-    cpu_offload(pipe.text_encoder, execution_device=torch.device(ENC))
-    embeds = encode_all(ENC)
-    how_encoded = f"streamed from host to {ENC}"
+        embeds[name] = ([t.detach().to("cpu", torch.float32) for t in pe],
+                        [t.detach().to("cpu", torch.float32) for t in ne])
+        del pe, ne
+        gc.collect(); torch.cuda.empty_cache()
+        print(f"  embedded {name} · {torch.cuda.memory_allocated(1 if ENC.endswith('1') else 0)/2**30:.1f} GB held", flush=True)
+how_encoded = f"fp16 resident on {ENC}, inference_mode"
 print(f"  prompts encoded ({how_encoded})", flush=True)
 pipe.text_encoder.to("cpu"); del pipe.text_encoder; pipe.text_encoder = None
 gc.collect(); torch.cuda.empty_cache()
@@ -141,10 +142,12 @@ print(f"  transformer on cuda:0 · vae on {DEC} · "
 H = W = 896
 def render(name, steps):
     pe, ne = embeds[name]
-    pe = [t.to("cuda:0") for t in pe]; ne = [t.to("cuda:0") for t in ne]
-    lat = pipe(prompt_embeds=pe, negative_prompt_embeds=ne, height=H, width=W,
-               num_inference_steps=steps, guidance_scale=5.0, output_type="latent",
-               generator=torch.Generator("cuda:0").manual_seed(SEED)).images
+    pe = [t.to("cuda:0", torch.bfloat16) for t in pe]
+    ne = [t.to("cuda:0", torch.bfloat16) for t in ne]
+    with torch.inference_mode():
+        lat = pipe(prompt_embeds=pe, negative_prompt_embeds=ne, height=H, width=W,
+                   num_inference_steps=steps, guidance_scale=5.0, output_type="latent",
+                   generator=torch.Generator("cuda:0").manual_seed(SEED)).images
     lat = lat.to(DEC, torch.float32)
     with torch.no_grad():
         x = pipe.vae.decode(lat / pipe.vae.config.scaling_factor + pipe.vae.config.shift_factor,
