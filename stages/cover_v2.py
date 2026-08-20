@@ -149,7 +149,8 @@ BRIEFS = {
                          "orange and grey around it, the frame square and symmetrical about the "
                          "blade with dark stone at the corners. ") + LIGHT + OPTIC,
 }
-HUMAN_PICK = "low_hero"       # the operator's, and overridable — the scorer only ever advises
+HUMAN_PICK = "wide_forge"     # the operator's call; of the four this is the one with the light
+                             # shaft, the anvil silhouette and room at the top for a title
 (WORK / "briefs.json").write_text(json.dumps(BRIEFS, indent=2))
 for k, v in BRIEFS.items():
     print(f"\n[{k}] {v[:150]}…", flush=True)
@@ -409,10 +410,11 @@ def stage_loop():
     hashes = {"high": sha20(HIGH), "low": sha20(LOW)}
     print("  wan sha256:", hashes, flush=True)
 
-    PROMPT = ("Photograph, locked-off tripod shot of a blacksmith's forge at night. A bed of glowing "
-              "orange coals burns in a stone hearth. The coals pulse and breathe, heat haze shimmers "
-              "above them, thin grey smoke drifts and curls upward, embers glow and fade. The camera "
-              "does not move. Cinematic, photorealistic, fine film grain.")
+    PROMPT = ("Photograph, locked-off tripod shot of a blacksmith's forge at night. A bed of coals "
+              "burns hard in a stone hearth: flames lick and flare up between the coals, the embers "
+              "surge and dim as the fire breathes, sparks fly upward in bursts, smoke billows and "
+              "rolls through the air above, heat haze boils over the whole bed. Vigorous, restless "
+              "fire. The camera is locked off and does not move. Cinematic, photorealistic, film grain.")
     NEG = ("camera movement, pan, zoom, dolly, handheld shake, cut, scene change, morphing, melting, "
            "people, hands, text, watermark, blurry, low quality, oversaturated, cartoon, flicker")
 
@@ -470,10 +472,16 @@ def stage_loop():
         pipe.enable_model_cpu_offload()
     pipe.scheduler = Pinned(shift=5.0)
 
-    NF, FPS, XF = 65, 16, 6                 # shorter than 81: drift compounds with frame count
+    # NO FIRST==LAST PIN. Pinning the same frame at both ends is what makes an unedited clip loop,
+    # and it costs motion: the model spends the clip returning to where it started. Measured, that
+    # bill came due — the raw generation moved 0.35 against 1.70 for the loop that looked alive, so
+    # the fire was nearly static before any compositing touched it. Here the wrap is closed by the
+    # dissolve instead, and the sword is held still by the composite rather than by the sampler, so
+    # nothing needs the pin any more and the fire is free to burn.
+    NF, FPS, XF = 81, 16, 8
     img = Image.fromarray(plate)
     t0 = time.time()
-    out = pipe(image=img, last_image=img, prompt_embeds=PE, negative_prompt_embeds=NE,
+    out = pipe(image=img, prompt_embeds=PE, negative_prompt_embeds=NE,
                height=H, width=W, num_frames=NF, num_inference_steps=4, guidance_scale=1.0,
                generator=torch.Generator("cuda:0").manual_seed(SEED), output_type="latent")
     if NGPU < 2:
