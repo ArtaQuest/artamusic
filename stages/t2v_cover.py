@@ -50,7 +50,7 @@ PINS = {
     "wan_gguf": ("QuantStack/Wan2.2-T2V-A14B-GGUF", "73eafba53a1a8f29254e4c77f92e74ea27d7cd6f"),
     "wan_high": "HighNoise/Wan2.2-T2V-A14B-HighNoise-Q4_K_M.gguf",
     "wan_low": "LowNoise/Wan2.2-T2V-A14B-LowNoise-Q4_K_M.gguf",
-    "tools_sha": "1a8fc3efa88a3533ed607faa27076394584c1e0a",
+    "tools_sha": "5216c42c2f61923451978174e0e72fc7ea5a6a20",
 }
 
 def sh(c, quiet=False):
@@ -99,23 +99,33 @@ clock("environment ready")
 # a defect seen in an actual take of this cover across the last three rounds.
 
 # %%
+# THE SWORD HAS TO BE DESCRIBED AS A SWORD. The first take of this was more photographic than
+# anything the image model produced — real charcoal, real flame, real ash — and its subject was a
+# flat featureless bar with no crossguard and no grip. That was my omission, not the model's: the
+# anatomy language that fixed exactly this failure for the stills ("a broad double-edged blade with
+# a straight crossguard and a leather-wrapped grip, unmistakably a sword and the largest object in
+# the frame") was never carried across when the still was dropped. It is here now, with the framing
+# that goes with it.
 PROMPT = (
-    "Locked-off static camera. Real documentary footage of a forge at night, shot on 65mm Kodak "
-    "Vision3 500T film at T2.8. A single forged steel sword lies motionless across a bed of "
-    "white-hot charcoal, the coals irregular broken lumps, cracked and glowing from within. The "
-    "fire breathes: embers pulse brighter and dimmer, small flames lick up along the blade's edge "
-    "and fall back, sparks rise and die, thin grey smoke drifts upward through a single shaft of "
-    "light and curls in the dark air. The sword itself does not move at all — it lies still and "
-    "the firelight plays over the polished steel, hammer marks and the hardening line catching the "
-    "light. Deep black shadow, one warm light source from the coals below, high dynamic range, "
-    "visible film grain, natural halation on the hot metal, shallow depth of field. Photographic, "
-    "solemn, monumental.")
+    "Locked-off static camera on a tripod. Real documentary footage shot on 65mm Kodak Vision3 "
+    "500T film at T2.8. One great forged sword — a broad double-edged blade with a straight "
+    "crossguard, a leather-wrapped grip and a round pommel, unmistakably a sword and the largest "
+    "object in the frame — lies motionless across a bed of white-hot charcoal, running corner to "
+    "corner of the frame on a diagonal. The coals are irregular broken lumps, cracked and glowing "
+    "from within. The fire breathes: embers pulse brighter and dimmer, small flames lick up along "
+    "the blade's edge and fall back, sparks rise and die, thin grey smoke drifts upward through a "
+    "single shaft of light and curls in the dark air. The sword itself does not move at all — it "
+    "lies perfectly still while the firelight plays over the polished steel, hammer marks and the "
+    "hardening line catching the light. Deep black shadow, one warm light source from the coals "
+    "below, high dynamic range, visible film grain, natural halation on the hot metal, shallow "
+    "depth of field. Nothing else is in the room. Photographic, solemn, monumental.")
 
 NEG = (
     "3d render, cgi, computer graphics, video game, unreal engine, octane render, plastic, smooth "
     "plastic surfaces, illustration, drawing, painting, cartoon, anime, concept art, airbrushed, "
     "waxy, artificial studio lighting, flat even lighting, washed out, low contrast, oversaturated "
-    "orange, barbecue briquettes, uniform charcoal blocks, camera motion, zoom, pan, handheld "
+    "orange, barbecue briquettes, uniform charcoal blocks, machete, flat metal bar, featureless "
+    "blade, knife with no crossguard, sword with no handle, camera motion, zoom, pan, handheld "
     "shake, the sword moving or sliding or rotating, warping metal, morphing shapes, text, "
     "watermark, logo, blurry, low resolution")
 (WORK / "prompt.json").write_text(json.dumps({"prompt": PROMPT, "negative": NEG}, indent=2))

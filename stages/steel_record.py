@@ -47,7 +47,7 @@ PINS = {
     "measure_sha": "17b49399cfd6c24f4070353fc33643ae15e1331d",      # ArtaQuest/artamusic lib/measure.py
     "lyric_profile_sha": "ebee5bf324d8a6cff22ba666825a777c7dfc5c39",  # ArtaQuest/artamusic lib/lyric_profile.py
     "lyric_sha": "88348bd9e0d21d196cb95c54c20b2943a629c68a",
-    "tools_sha": "1a8fc3efa88a3533ed607faa27076394584c1e0a",   # ArtaQuest/artamusic lib/{stillness,freeze}.py          # ArtaQuest/artamusic song/lyrics_steel.txt + lib/clarity.py
+    "tools_sha": "5216c42c2f61923451978174e0e72fc7ea5a6a20",   # ArtaQuest/artamusic lib/{stillness,freeze}.py          # ArtaQuest/artamusic song/lyrics_steel.txt + lib/clarity.py
     "asr": "large-v3",
     "image_turbo": ("Tongyi-MAI/Z-Image-Turbo", "f332072aa78be7aecdf3ee76d5c247082da564a6"),
     "wan_base": ("Wan-AI/Wan2.2-I2V-A14B-Diffusers", "596658fd9ca6b7b71d5057529bbf319ecbc61d74"),
