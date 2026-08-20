@@ -201,6 +201,47 @@ def precheck_source(py):
         break
 
 
+    # A PIN THAT SERVES OLD CODE IS A SILENT WRONG ANSWER. The notebook fetches its instruments
+    # and its lyric from this repo at a commit sha. Edit one of those files, forget to push or to
+    # bump the sha, and the kernel runs the version you no longer have — no error, no warning, just
+    # a measurement taken with an instrument you think you replaced. So: for every pinned file that
+    # also exists in this working tree, fetch what the pin actually serves and compare the bytes.
+    import re as _re2, urllib.request as _ur, hashlib as _hl
+    _text = Path(_src).read_text()
+    _shas = dict(_re2.findall(r'"(\w+)":\s*"([0-9a-f]{40})"', _text))
+    _root = Path(_src).resolve().parent.parent
+    for _key, _path in _re2.findall(
+            r'artamusic/\{PINS\[[\'"](\w+)[\'"]\]\}/([\w./-]*(?:\{[\w_]+\})?[\w./-]*)', _text):
+        _sha = _shas.get(_key)
+        if not _sha:
+            continue
+        # a path built from a loop variable ("lib/{_f}") names a DIRECTORY of pinned files; check
+        # every python file in it, or the most important pin in the notebook goes unchecked
+        _targets = []
+        if "{" in _path:
+            _dir = _path.split("{")[0].rstrip("/")
+            _names = _re2.findall(rf'for _?\w+ in \(([^)]*)\)[^\n]*\n[^\n]*{_re2.escape(_dir)}', _text)
+            for _grp in _names:
+                _targets += [f"{_dir}/{_n}" for _n in _re2.findall(r'"([\w.]+)"', _grp)]
+        else:
+            _targets = [_path]
+        for _path in _targets:
+            _local = _root / _path
+            if not _local.exists():
+                continue
+            _url = f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{_sha}/{_path}"
+            try:
+                _remote = _ur.urlopen(_url, timeout=30).read()
+            except Exception as _e:
+                raise RuntimeError(f"{py}: pin {_key}={_sha[:7]} does not serve {_path} ({_e}) "
+                                   f"— refusing to push a kernel that will 404 on its own tools")
+            if _hl.sha256(_remote).hexdigest() != _hl.sha256(_local.read_bytes()).hexdigest():
+                raise RuntimeError(
+                    f"{py}: pin {_key}={_sha[:7]} serves a DIFFERENT {_path} than the one in this "
+                    f"working tree. The kernel would run code you no longer have. Commit and push it, "
+                    f"then set {_key} to the new sha.")
+
+
 def push_verified(slug, title, py, public=True, sources=(), tries=6, allow_violations=False,
                   internet=False, gpu=True):
     """Push, then READ BACK the pushed source and confirm it matches what we meant to send.
