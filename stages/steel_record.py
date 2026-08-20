@@ -46,6 +46,7 @@ PINS = {
     "measure_sha": "17b49399cfd6c24f4070353fc33643ae15e1331d",      # ArtaQuest/artamusic lib/measure.py
     "lyric_profile_sha": "ebee5bf324d8a6cff22ba666825a777c7dfc5c39",  # ArtaQuest/artamusic lib/lyric_profile.py
     "lyric_sha": "88348bd9e0d21d196cb95c54c20b2943a629c68a",
+    "shot_sha": "9fed845f616bcfab1404e220bf13f0366690135b",   # ArtaQuest/artamusic song/shot_steel.json
     "tools_sha": "e43b03d4ddc8810e67f467f52feef9ce65ce9131",   # ArtaQuest/artamusic lib/{stillness,freeze}.py          # ArtaQuest/artamusic song/lyrics_steel.txt + lib/clarity.py
     "asr": "large-v3",
     # NO IMAGE MODEL, and no image conditioning. The cover used to be a still made by a
@@ -305,35 +306,19 @@ BPM, KEYSCALE = 100, "F minor"   # match the conditioning reference; a key fight
 # Everything the model was once free to invent — how big the blade is, what a sword looks like,
 # what a coal looks like, what else is in the room — is stated, because each was got wrong when
 # left unsaid.
-# THE SWORD HAS TO BE DESCRIBED AS A SWORD. The first take of this was more photographic than
-# anything the image model produced — real charcoal, real flame, real ash — and its subject was a
-# flat featureless bar with no crossguard and no grip. That was my omission, not the model's: the
-# anatomy language that fixed exactly this failure for the stills ("a broad double-edged blade with
-# a straight crossguard and a leather-wrapped grip, unmistakably a sword and the largest object in
-# the frame") was never carried across when the still was dropped. It is here now, with the framing
-# that goes with it.
-PROMPT = (
-    "Locked-off static camera on a tripod. Real documentary footage shot on 65mm Kodak Vision3 "
-    "500T film at T2.8. One great forged sword — a broad double-edged blade with a straight "
-    "crossguard, a leather-wrapped grip and a round pommel, unmistakably a sword and the largest "
-    "object in the frame — lies motionless across a bed of white-hot charcoal, running corner to "
-    "corner of the frame on a diagonal. The coals are irregular broken lumps, cracked and glowing "
-    "from within. The fire breathes: embers pulse brighter and dimmer, small flames lick up along "
-    "the blade's edge and fall back, sparks rise and die, thin grey smoke drifts upward through a "
-    "single shaft of light and curls in the dark air. The sword itself does not move at all — it "
-    "lies perfectly still while the firelight plays over the polished steel, hammer marks and the "
-    "hardening line catching the light. Deep black shadow, one warm light source from the coals "
-    "below, high dynamic range, visible film grain, natural halation on the hot metal, shallow "
-    "depth of field. Nothing else is in the room. Photographic, solemn, monumental.")
-
-NEG = (
-    "3d render, cgi, computer graphics, video game, unreal engine, octane render, plastic, smooth "
-    "plastic surfaces, illustration, drawing, painting, cartoon, anime, concept art, airbrushed, "
-    "waxy, artificial studio lighting, flat even lighting, washed out, low contrast, oversaturated "
-    "orange, barbecue briquettes, uniform charcoal blocks, machete, flat metal bar, featureless "
-    "blade, knife with no crossguard, sword with no handle, camera motion, zoom, pan, handheld "
-    "shake, the sword moving or sliding or rotating, warping metal, morphing shapes, text, "
-    "watermark, logo, blurry, low resolution")
+# THE SHOT COMES FROM ONE FILE, at a pinned commit. It used to be inline here and inline in the
+# cover notebook, and the two drifted apart three times — most recently THIS file was still
+# describing a sword lying still after the shot had become the hammering, which would have made a
+# cover of the wrong subject with nothing in the code to say so. hold_subject travels with it
+# because it belongs to the shot: a sword lying still wants the freeze, a hammer swinging must not
+# have it, and keeping the flag away from the words describing the motion is how they disagree.
+urllib.request.urlretrieve(
+    f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['shot_sha']}/song/shot_steel.json",
+    "/tmp/shot_steel.json")
+SHOT = json.loads(Path("/tmp/shot_steel.json").read_text())
+PROMPT, NEG, HOLD_SUBJECT = SHOT["prompt"], SHOT["negative"], SHOT["hold_subject"]
+assert "anvil" in PROMPT and "hammer" in PROMPT, "the fetched shot is not the hammering shot"
+print(f"[shot] {SHOT['name']} · hold_subject={HOLD_SUBJECT}\n[prompt] {PROMPT}", flush=True)
 (WORK / "prompt.json").write_text(json.dumps({"prompt": PROMPT, "negative": NEG}, indent=2))
 
 # ── the measuring instruments, at a pinned commit, proven before anything expensive runs ──
@@ -425,7 +410,7 @@ if __name__ == "__main__":
 def stage_cover():
     # The whole cover, generated as VIDEO from text — ported from stages/t2v_cover.py,
     # the standalone notebook it was proven in. No still image, no image conditioning.
-    PROMPT = CFG["prompt"]; NEG = CFG["negative"]
+    PROMPT = CFG["prompt"]; NEG = CFG["negative"]; HOLD_SUBJECT = CFG["hold_subject"]; CYCLE = {}
     import stillness as S, freeze as F
     from diffusers import WanPipeline, WanTransformer3DModel, AutoencoderKLWan, GGUFQuantizationConfig
     from transformers import UMT5EncoderModel, AutoTokenizer
@@ -691,7 +676,8 @@ Path("/tmp/aq_stage.py").write_text(STAGE_SRC)
 Path("/tmp/aq_cfg.json").write_text(json.dumps({
     "pins": {k: (list(v) if isinstance(v, tuple) else v) for k, v in PINS.items()},
     "seed": SEED, "tmp": str(TMP), "work": str(WORK), "out": str(OUT), "hf_home": str(TMP / "hf"),
-    "tools": str(TOOLS), "prompt": PROMPT, "negative": NEG}))
+    "tools": str(TOOLS), "prompt": PROMPT, "negative": NEG,
+    "hold_subject": HOLD_SUBJECT}))
 
 # A TIMEOUT THAT KILLS A SLOW STAGE IS A LIABILITY, NOT A SAFETY NET. The cover loop was measured
 # at 28 minutes on a T4 pair and then, on the very next run, took over 120 on the same declared

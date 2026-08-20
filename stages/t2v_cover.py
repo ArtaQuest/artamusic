@@ -36,6 +36,7 @@
 # %%
 import gc, json, os, subprocess, sys, time, urllib.request
 from pathlib import Path
+import pathlib
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 T0 = time.time()
@@ -50,6 +51,7 @@ PINS = {
     "wan_gguf": ("QuantStack/Wan2.2-T2V-A14B-GGUF", "73eafba53a1a8f29254e4c77f92e74ea27d7cd6f"),
     "wan_high": "HighNoise/Wan2.2-T2V-A14B-HighNoise-Q4_K_M.gguf",
     "wan_low": "LowNoise/Wan2.2-T2V-A14B-LowNoise-Q4_K_M.gguf",
+    "shot_sha": "9fed845f616bcfab1404e220bf13f0366690135b",   # ArtaQuest/artamusic song/shot_steel.json
     "tools_sha": "e43b03d4ddc8810e67f467f52feef9ce65ce9131",
 }
 
@@ -100,44 +102,21 @@ clock("environment ready")
 # a defect seen in an actual take of this cover across the last three rounds.
 
 # %%
-# THE SHOT IS THE HAMMERING NOW, not a sword lying still — so the subject is SUPPOSED to move, and
-# the freeze that guaranteed a motionless blade would destroy the very thing being asked for. It is
-# switched off by HOLD_SUBJECT below, along with the stillness gates, which measure a property this
-# shot does not want. The liveness counter-gate stays: the fire must still be alive.
-#
-# What carries over is the lesson that cost two rounds — the model renders what is NAMED and
-# invents what is not. A sword with no described anatomy came back as a featureless bar; naming the
-# crossguard, the grip and the pommel fixed it outright, visibly, in one run. So the hammer, the
-# tongs and the anvil are each described, the forge interior is named (a bed of coals with no
-# building around it renders a campfire — twice, correctly), and no face is asked for: hands and
-# forearms only, because faces and fingers are where these models fail most visibly.
-HOLD_SUBJECT = False
+# THE SHOT COMES FROM ONE FILE, at a pinned commit. It used to be inline here and inline in the
+# record notebook, and the two drifted apart three times — most recently the record was still
+# describing a sword lying still after the shot had become the hammering, which would have made a
+# cover of the wrong subject with nothing in the code to say so. hold_subject travels with it
+# because it belongs to the shot: a sword lying still wants the freeze, a hammer swinging must not
+# have it, and keeping the flag away from the words describing the motion is how they disagree.
+urllib.request.urlretrieve(
+    f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['shot_sha']}/song/shot_steel.json",
+    "/tmp/shot_steel.json")
+SHOT = json.loads(pathlib.Path("/tmp/shot_steel.json").read_text())
+PROMPT, NEG, HOLD_SUBJECT = SHOT["prompt"], SHOT["negative"], SHOT["hold_subject"]
 CYCLE = {}
-
-PROMPT = (
-    "Locked-off static camera on a tripod, close on a heavy black iron anvil inside the dark stone "
-    "interior of a blacksmith's forge at night — soot-blackened brick, the far walls lost in "
-    "blackness, the hearth glowing orange behind. A sword blade, heated to glowing orange-white "
-    "along its length, lies across the anvil gripped in a pair of long iron tongs. A big "
-    "blacksmith's hammer swings down and strikes the hot steel: on each impact a burst of bright "
-    "sparks explodes outward and showers down across the anvil and the floor, the struck metal "
-    "flares yellow-white, and the hammer lifts and comes down again in a steady, powerful rhythm. "
-    "Only the smith's gloved hands and bare forearms are in frame, no face and no full body. "
-    "Shot on 65mm Kodak Vision3 500T film at T2.8, deep black shadow, the only light coming from "
-    "the glowing steel and the hearth, high dynamic range, visible film grain, natural halation on "
-    "the hot metal, sparks in sharp focus, slight motion blur on the hammer head. Photographic, "
-    "epic, monumental.")
-
-NEG = (
-    "face, portrait, full body, whole person, crowd, "
-    "campfire, bonfire, fire pit, outdoors, open ground, forest, night sky, scattered ash on soil, "
-    "barbecue, barbecue briquettes, "
-    "machete, flat metal bar, featureless blade, knife with no crossguard, "
-    "3d render, cgi, computer graphics, video game, unreal engine, octane render, plastic, smooth "
-    "plastic surfaces, illustration, drawing, painting, cartoon, anime, concept art, airbrushed, "
-    "waxy, artificial studio lighting, flat even lighting, washed out, low contrast, "
-    "camera motion, zoom, pan, handheld shake, warping metal, morphing shapes, extra fingers, "
-    "deformed hands, text, watermark, logo, blurry, low resolution")
+assert "anvil" in PROMPT and "hammer" in PROMPT, "the fetched shot is not the hammering shot"
+print(f"[shot] {SHOT['name']} · hold_subject={HOLD_SUBJECT}\n[prompt] {PROMPT}\n[negative] {NEG}",
+      flush=True)
 (WORK / "prompt.json").write_text(json.dumps({"prompt": PROMPT, "negative": NEG}, indent=2))
 print(f"[prompt] {PROMPT[:160]}…\n[negative] {NEG[:120]}…", flush=True)
 
