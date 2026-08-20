@@ -122,19 +122,30 @@ def to_ipynb(py, out):
     the prose (leading `# ` stripped) — documentation that renders on Kaggle and in ArtaReader's
     book page, while the .py stays valid python (they are comments there)."""
     src = Path(py).read_text()
-    marks = [m.start() for m in re.finditer(r"^# ── |^# %% \[markdown\]", src, re.M)]
+    # `# %%` COUNTS TOO. It used to recognise only `# ── ` for a code cell, so a file written in
+    # the ordinary percent format had every one of its code blocks swallowed into the preceding
+    # markdown cell — the still probe pushed as FOUR MARKDOWN CELLS AND NO CODE, ran nothing,
+    # produced no files, and Kaggle reported it complete in two minutes. A notebook that executes
+    # nothing and calls it success is the worst failure available here, so the marker everyone
+    # reaches for is now supported rather than silently misread.
+    marks = [m.start() for m in re.finditer(r"^# ── |^# %%", src, re.M)]
     bounds = [0] + marks + [len(src)]
     cells = []
     for a, b in zip(bounds, bounds[1:]):
         chunk = src[a:b].rstrip()
         if not chunk.strip():
             continue
-        if chunk.startswith("# %% [markdown]"):
+        if chunk.startswith("# %% [markdown]"):   # checked BEFORE the bare `# %%` below
             body = "\n".join(re.sub(r"^# ?", "", l) for l in chunk.splitlines()[1:]).strip()
             cells.append({"cell_type": "markdown", "metadata": {}, "source": body})
         else:
             cells.append({"cell_type": "code", "metadata": {}, "execution_count": None,
                           "outputs": [], "source": chunk})
+    if not any(c["cell_type"] == "code" for c in cells):
+        raise ValueError(
+            f"{py} produced {len(cells)} cells and NONE of them are code — the whole file was read "
+            f"as prose. Kaggle will run it, produce nothing, and report success. Check the cell "
+            f"markers: `# ── ` or `# %%` for code, `# %% [markdown]` for prose.")
     Path(out).write_text(json.dumps({"cells": cells, "nbformat": 4, "nbformat_minor": 5,
         "metadata": {"kernelspec": {"name": "python3", "display_name": "Python 3",
                      "language": "python"}, "language_info": {"name": "python"}}}, indent=1))
