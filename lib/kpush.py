@@ -316,7 +316,18 @@ if __name__ == "__main__":
             sys.exit(f"refusing to push: {a.py} uses {', '.join(needs)} but --internet was not "
                      f"given, so the kernel will fail at its first fetch with a DNS error")
         r = call(api().kernels_push, str(f), timeout=None, acc=None)
-        print("error:", getattr(r, "error", None), "| url:", getattr(r, "url", None))
+        url = getattr(r, "url", None) or ""
+        print("error:", getattr(r, "error", None), "| url:", url)
+        # KAGGLE DERIVES THE SLUG FROM THE TITLE WHEN THEY DISAGREE, and only warns. Asking for
+        # `steel-still-probe` with a descriptive title produced
+        # `steel-still-probe-z-image-base-on-the-pair`, so every later status, log and output call
+        # was aimed at a kernel that does not exist — which Kaggle answers 403, not 404, so it
+        # reads as a permissions problem rather than a typo. Say the real slug loudly.
+        landed = url.rstrip("/").split("/")[-1]
+        if landed and landed != a.slug:
+            print(f"\n!! the title moved the slug: asked for '{a.slug}', landed on '{landed}'.\n"
+                  f"   Poll THAT slug, or re-push with a title that slugifies to '{a.slug}'.",
+                  file=sys.stderr)
     elif a.cmd == "status":
         print(call(api().kernels_status, f"{owner()}/{a.slug}"))
     else:
