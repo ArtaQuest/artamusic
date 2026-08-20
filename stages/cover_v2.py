@@ -176,14 +176,14 @@ BRIEFS = {
                       "below, the hall receding into blackness on both sides, one shaft of light "
                       "from far above striking the length of the steel. ") + LIGHT + OPTIC,
 }
-HUMAN_PICK = "low_hero"      # CHANGED from wide_forge after looking at all four. wide_forge had
-                             # the better light — a real shaft, a clean anvil silhouette — but its
-                             # sword was small and shapeless, and a cover for a song called STEEL
-                             # cannot have an illegible blade. low_hero is the one where the sword
-                             # is a sword: crossguard, grip and pommel all read, it runs corner to
-                             # corner, and the smoke fills the empty top half where a title goes.
-                             # It is also the better subject for the freeze — a bigger, clearer
-                             # blade is a bigger, cleaner mask.
+HUMAN_PICK = "edge_macro"    # Looked at full size against low_hero, which was the previous
+                             # pick. Once the brief made every blade legible, the question stopped
+                             # being "which one is a sword" and became "which one is a cover":
+                             # edge_macro has the thicker, more imposing blade, real flame and
+                             # sparks behind it instead of only smoke, and a crossguard and grip
+                             # that read at a glance. low_hero has the cleaner title space and a
+                             # more delicate blade, and visible furniture the brief excluded.
+                             # A larger blade is also a larger, cleaner mask for the freeze.
 (WORK / "briefs.json").write_text(json.dumps(BRIEFS, indent=2))
 for k, v in BRIEFS.items():
     print(f"\n[{k}] {v[:150]}…", flush=True)
