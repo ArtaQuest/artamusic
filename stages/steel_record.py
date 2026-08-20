@@ -231,17 +231,37 @@ BPM, KEYSCALE = 100, "F minor"   # match the conditioning reference; a key fight
                                  # and a publication run is not where you run one
 
 # %% [markdown]
-# ## The cover still — Z-Image-Turbo, four seeds, the choice recorded
+# ## The cover still — four briefs, not four seeds
 #
 # The cover is made before the song on purpose: it is the cheaper stage and the one with the newest
 # machinery, so a failure there is found in half an hour, and the song then renders on a clean card.
 #
-# Z‑Image‑Turbo (6.15B, Apache‑2.0, CFG‑distilled: 9 steps, guidance 0) reads as a photograph
-# where SDXL read as a game render. It runs on a 16 GB card only under **sequential CPU offload**
-# (the DiT and its Qwen3‑4B text encoder cannot both be resident). Four seeds are rendered and
-# scored on edge energy, warmth and darkness. The scorer prefers seed 5150; the human eye prefers
-# **6270** — the blade sweeping the frame with the hearth behind — and this run records both and
-# ships the eye's choice. Arguing with a scorer is allowed; hiding the argument is not.
+# Z‑Image‑Turbo (6.15B, Apache‑2.0, CFG‑distilled: 9 steps, guidance 0) reads as a photograph where
+# SDXL read as a game render. It runs on a 16 GB card only under **sequential CPU offload** — the
+# DiT and its Qwen3‑4B text encoder cannot both be resident.
+#
+# What changed is not the model but what it is asked for. One prompt at four seeds gives four
+# versions of the same picture; four **briefs** give four different pictures to choose between, each
+# naming where the camera is, what fills the frame and what is deliberately left empty. And each
+# names the things that went wrong when they were left unsaid: the blade must be the largest object
+# in the frame, a sword has a crossguard and a leather‑wrapped grip, a coal is an irregular broken
+# lump rather than a uniform block, and nothing else is in the room. Every one of those was got
+# wrong by a model that was never told.
+#
+# A bigger model was looked for and is not available on this hardware. Krea 2 Turbo ships for
+# python only as 4‑bit bitsandbytes, which cannot be dispatched across two cards. FLUX.1‑Krea‑dev
+# is gated, and so is FLUX.1‑schnell whose VAE and text encoders it would borrow — a gated input
+# fails this platform's own every‑input‑is‑public rule. Z‑Image **base**, which is the better model
+# because it takes real CFG and a real negative prompt, was measured here with the transformer
+# resident on one card and the encoder on the other: 896² and 832² and 768² all out of memory, 704²
+# fits at 23.7 seconds a step, and it ran out of memory anyway during the real render. It would be
+# smaller than Turbo and four times slower.
+#
+# The scorer's numbers — edge energy, warmth, darkness — are printed beside the choice, and the
+# choice is a person's. Arguing with a scorer is allowed; hiding the argument is not. What the
+# scorer DOES decide is refusal: a frame with no contrast is not a candidate, because four pure
+# black stills were once scored, upscaled and shipped by this pipeline with the contrast logged as
+# 0.0 and nothing comparing it to anything.
 
 # %% [markdown]
 # ## The cover loop — Wan2.2‑I2V‑A14B, and the sword composited back frozen
@@ -1160,5 +1180,6 @@ print("\nMANIFEST:", json.dumps({k: v["bytes"] for k, v in manifest.items()}, in
 assert not problems, "VERIFY REFUSED THE RECORD: " + "; ".join(problems)
 print(f"\nVERIFIED: male [{reg.get('register')}] · words {acc*100:.1f}% ({_WH[1]}) · "
       f"{Lm.get('lufs')} LUFS · LRA {Lm.get('lra_lu')} · TP {tp} dBTP · 0 clipped · "
-      f"loop wrap {lp['wrap_ratio']}x · {lp['frames']} frames", flush=True)
+      f"blade drift {loop_rec['frozen']['drift_px']} px · fire {loop_rec['alive']['fire_motion']} · "
+      f"{loop_rec['frames']} frames", flush=True)
 clock("DONE")

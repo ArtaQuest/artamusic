@@ -151,28 +151,18 @@ def to_ipynb(py, out):
                      "language": "python"}, "language_info": {"name": "python"}}}, indent=1))
     return out
 
-def push_verified(slug, title, py, public=True, sources=(), tries=6, allow_violations=False,
-                  internet=False, gpu=True):
-    """Push, then READ BACK the pushed source and confirm it matches what we meant to send.
+def precheck_source(py):
+    """Every static check that must pass before a kernel leaves this laptop.
 
-    PUBLIC BY DEFAULT. ArtaSwitch rotates the compute account between runs, and a PRIVATE kernel
-    becomes unreadable the instant it does — a finished run's error log was lost that way, with
-    ten retries all answering 'Permission kernels.get was denied' because the credential had
-    moved. Public costs nothing here: the code already lives in a public repo, and a stranger
-    being able to re-run it is the platform's entire thesis.
-
-    Three kernels in a row died at their own mount assert because a push was assumed to have
-    landed: once the --kernel-source flag was omitted, once the push output was swallowed by an
-    SSL error mid-request, once the wrong OWNER was named (the source kernel ran on a different
-    account). The assert was right every time; the push was not verified. This makes verification
-    the only way to push, so the failure mode cannot recur.
+    These lived inside push_verified, which the command line does not call — so every push
+    made by hand skipped the unbound-name scans and the embedded-source scan entirely. A
+    guard sitting one layer above the path that is actually used protects nothing.
     """
-    import json as _j, subprocess as _sp, sys as _sys, tempfile as _tf, time as _t
     # Unskippable static check. Two kernels died on a NameError at module scope after the model
     # had already loaded — 40 ms of AST work would have caught both. A cheap check only helps if
     # it cannot be forgotten, so it lives here rather than in a habit.
     from precheck import unbound, unbound_in_functions
-    _src = str((HERE / py).resolve())
+    _src = str(Path(py).resolve())
     _bad = unbound(_src)
     if _bad:
         raise RuntimeError(f"{py}: unbound names at module scope {_bad} — refusing to push")
@@ -199,7 +189,36 @@ def push_verified(slug, title, py, public=True, sources=(), tries=6, allow_viola
             _be = unbound_in_functions(_emb, is_src=True)
             if _be:
                 raise RuntimeError(f"{py}: embedded {_m.group(1)} unbound names {_be} — refusing to push")
+            # MODULE SCOPE INSIDE THE EMBEDDED SOURCE TOO. Checking only functions left a hole the
+            # width of a whole file: after a stage was replaced wholesale, a name it used at module
+            # scope no longer existed, and that reference sat on the LAST line of a three-hour run.
+            import tempfile as _tf2
+            _t2 = Path(_tf2.mkdtemp()) / "embed.py"; _t2.write_text(_emb)
+            _bem = unbound(str(_t2))
+            if _bem:
+                raise RuntimeError(f"{py}: embedded {_m.group(1)} unbound at module scope {_bem} "
+                                   f"— refusing to push")
         break
+
+
+def push_verified(slug, title, py, public=True, sources=(), tries=6, allow_violations=False,
+                  internet=False, gpu=True):
+    """Push, then READ BACK the pushed source and confirm it matches what we meant to send.
+
+    PUBLIC BY DEFAULT. ArtaSwitch rotates the compute account between runs, and a PRIVATE kernel
+    becomes unreadable the instant it does — a finished run's error log was lost that way, with
+    ten retries all answering 'Permission kernels.get was denied' because the credential had
+    moved. Public costs nothing here: the code already lives in a public repo, and a stranger
+    being able to re-run it is the platform's entire thesis.
+
+    Three kernels in a row died at their own mount assert because a push was assumed to have
+    landed: once the --kernel-source flag was omitted, once the push output was swallowed by an
+    SSL error mid-request, once the wrong OWNER was named (the source kernel ran on a different
+    account). The assert was right every time; the push was not verified. This makes verification
+    the only way to push, so the failure mode cannot recur.
+    """
+    import json as _j, subprocess as _sp, sys as _sys, tempfile as _tf, time as _t
+    precheck_source(HERE / py)
     # Tier-0 contracts: every v1 death class, checked in under a second on the bytes we push.
     # A kernel that would die for a non-GPU reason never leaves the laptop.
     from contract import check as _contract
@@ -320,6 +339,7 @@ if __name__ == "__main__":
         # than a flag you did not pass. It cost a run: six minutes in, "Temporary failure in name
         # resolution", on a notebook whose whole first cell is a pip install. The source says
         # plainly whether it needs the network, so ask it rather than the operator's memory.
+        precheck_source(HERE / a.py)
         src = (HERE / a.py).read_text()
         needs = [n for n in ("pip install", "snapshot_download", "hf_hub_download", "urlretrieve",
                              "requests.get", "urlopen", "git clone") if n in src]
