@@ -63,6 +63,45 @@ def _deviation(a, b, mask):
     return float(np.abs(x - y).mean()) if x.size else 0.0
 
 
+def _lit_deviation(g, mask, sigma=None):
+    """Deviation that LIGHT cannot explain.
+
+    `_deviation` counts every grey level of change inside the mask, and that turned out to conflate
+    two opposite things. The composite deliberately re-lights the frozen subject from the coals, so
+    its pixels are SUPPOSED to swing in brightness — the liveness gate fails the shot if they do
+    not. Take eight was refused at 10.35 grey levels while its blade sat at 0.0 px drift: the two
+    gates were measuring the same firelight with opposite signs, and one of them had to be wrong.
+
+    So fit a smooth per-frame gain field inside the mask, by local least squares, and report what
+    is LEFT. Smooth because that is the only shape `relight_field` can produce; a subject that
+    wobbles, morphs or slides leaves a residual no smooth gain can absorb — measured on this run,
+    5.5 for the frozen composite against 17.7 for the same clip un-composited.
+    """
+    g0 = g[0]
+    sigma = sigma or max(12.0, 0.04 * g0.shape[0])
+    c = np.asarray(mask, dtype=np.float32)
+    den = _blur((g0 * g0 * c).astype(np.float32), sigma) + 1e-6
+    out = []
+    for f in g:
+        field = _blur((f * g0 * c).astype(np.float32), sigma) / den
+        out.append(float(np.abs(f[mask] - (g0 * field)[mask]).mean()))
+    return out
+
+
+def _blur(a, sigma):
+    """Separable box-cascade gaussian — three passes, numpy only (no scipy on the kernel)."""
+    r = max(1, int(round(sigma * 0.9)))
+    k = np.ones(2 * r + 1, dtype=np.float32) / (2 * r + 1)
+    out = np.asarray(a, dtype=np.float32)
+    for _ in range(3):
+        for ax in (0, 1):
+            pad = [(0, 0)] * out.ndim
+            pad[ax] = (r, r)
+            q = np.pad(out, pad, mode="edge")
+            out = np.apply_along_axis(lambda v: np.convolve(v, k, "valid"), ax, q)
+    return out
+
+
 def measure(video, mask=None, size=None):
     a = frames_of(video, size).astype(np.float32)
     g = a.mean(3)
@@ -85,6 +124,19 @@ def measure(video, mask=None, size=None):
     tpl = g[0][y0:y1, x0:x1]
     tmask = mask[y0:y1, x0:x1]
     R = 8
+
+    # ZERO-MEAN NORMALISED correlation, not raw SAD. SAD compares absolute brightness, so when the
+    # subject is deliberately re-lit the cheapest way to "match" frame 0 is to slide onto whatever
+    # happens to be equally bright — and the matcher reported 5.1 px of drift for a bar that never
+    # moved a pixel, purely because a firelight ramp swept across it. Normalising each candidate
+    # patch to zero mean and unit variance makes the score depend on PATTERN alone, which is the
+    # question being asked. (The selftest holds a re-lit frozen bar at 0.0 px on this, and still
+    # finds the 4 px drift it is supposed to find.)
+    def norm(v):
+        v = v - v.mean()
+        return v / max(float(np.sqrt((v * v).mean())), 1e-6)
+
+    tn = norm(tpl[tmask])
     shifts = []
     for f in g:
         patch = f[y0:y1, x0:x1]
@@ -92,9 +144,9 @@ def measure(video, mask=None, size=None):
         for dy in range(-R, R + 1):
             for dx in range(-R, R + 1):
                 sh = np.roll(np.roll(patch, -dy, axis=0), -dx, axis=1)
-                sad = float(np.abs(sh[tmask] - tpl[tmask]).mean())
-                if best is None or sad < best:
-                    best, bdy, bdx = sad, dy, dx
+                score = -float((norm(sh[tmask]) * tn).mean())      # lower is better
+                if best is None or score < best:
+                    best, bdy, bdx = score, dy, dx
         shifts.append((bdy, bdx))
     shifts = np.array(shifts, dtype=float)
     drift = float(np.hypot(shifts[:, 1].max() - shifts[:, 1].min(),
@@ -102,10 +154,12 @@ def measure(video, mask=None, size=None):
     swing = float(np.abs(shifts).max())        # worst single-frame displacement, in pixels
 
     devs = [_deviation(g[0], f, mask) for f in g]
+    lit = _lit_deviation(g, mask)
     return {"frames": int(len(a)), "mask_px": int(mask.sum()),
             "mask_pct": round(100 * float(mask.mean()), 2),
             "drift_px": round(drift, 1), "max_shift_px": round(swing, 1),
             "max_dev": round(float(np.max(devs)), 2),
+            "lit_dev": round(float(np.max(lit)), 2),
             "motion_inside": round(inside, 2), "motion_outside": round(outside, 2),
             "ratio": round(inside / max(outside, 1e-6), 2)}
 
@@ -143,7 +197,15 @@ def liveness_verdict(m):
 
 # What "it does not move" means, in numbers. A rigid subject in a cinemagraph should be the
 # STILLEST thing in the frame, not the busiest.
-LIMIT = {"drift_px": 2.0, "max_shift_px": 1.0, "max_dev": 6.0, "ratio": 1.0}
+LIMIT = {"drift_px": 2.0, "max_shift_px": 1.0, "ratio": 1.0,
+         # `max_dev` USED to be gated here at 6.0 and is now reported only, because it cannot tell
+         # firelight from movement: it failed a blade sitting at 0.0 px drift for the crime of
+         # being lit, and the selftest below shows it failing a subject that provably never moves.
+         # `lit_dev` takes its place at the SAME 6.0 and asks the question that was meant all
+         # along — does the subject change in ways lighting cannot explain? Nothing here was
+         # relaxed to let a particular run through: the run that prompted this passes at max_dev
+         # 5.03 under the old gate too, once its relight is chosen by the ladder in freeze_lit.
+         "lit_dev": 6.0}
 
 
 def verdict(m):
@@ -152,8 +214,9 @@ def verdict(m):
         bad.append(f"the subject wanders {m['drift_px']} px (limit {LIMIT['drift_px']})")
     if m["max_shift_px"] > LIMIT["max_shift_px"]:
         bad.append(f"one frame sits {m['max_shift_px']} px off (limit {LIMIT['max_shift_px']})")
-    if m["max_dev"] > LIMIT["max_dev"]:
-        bad.append(f"its worst frame differs by {m['max_dev']} grey levels (limit {LIMIT['max_dev']})")
+    if m.get("lit_dev", 0) > LIMIT["lit_dev"]:
+        bad.append(f"its pixels change by {m['lit_dev']} grey levels in ways lighting cannot "
+                   f"explain (limit {LIMIT['lit_dev']})")
     if m["ratio"] > LIMIT["ratio"]:
         bad.append(f"it moves {m['ratio']}x MORE than the rest of the frame (limit {LIMIT['ratio']}x)")
     return bad
@@ -193,6 +256,57 @@ def selftest(tmp=None):
         print(f"   {name:22s} drift {m['drift_px']:5.1f} px · shift {m['max_shift_px']:4.1f} px · "
               f"dev {m['max_dev']:5.2f} · ratio {m['ratio']:5.2f} -> "
               f"{'holds' if not bad else 'MOVES'}  {'ok' if good else 'FAIL'}")
+    # THE TWO CASES THAT SEPARATE LIGHT FROM MOVEMENT. Adding lit_dev could have made the gate
+    # permissive instead of correct, so both directions are proved here: a subject that is re-lit
+    # but never moves must PASS, and a subject that keeps its brightness while its SHAPE changes
+    # must FAIL. The blade is given texture on purpose — a smooth gain absorbs perfectly on a flat
+    # region, so a uniform bar would prove nothing.
+    from PIL import Image as _I3
+    # base brightness kept well clear of 255: a relight that CLIPS is not multiplicative any
+    # more, and the fixture would be testing the clamp rather than the physics.
+    tex = (120 + 30 * np.sin(np.arange(W) / 3.0)[None, :] + rng.normal(0, 6, (H, W))).clip(0, 255)
+    for name, mode in (("frozen but re-lit", "light"), ("held still, shape changing", "morph")):
+        d = tmp / mode; d.mkdir(exist_ok=True)
+        for i in range(24):
+            small = rng.normal(0, 1, (16, 16))
+            blob = np.asarray(_I3.fromarray(small.astype(np.float32), mode="F").resize((W, H), _I3.BILINEAR))
+            bg = (90 + 45 * np.sin(i / 3 + blob * 2) + 12 * blob).clip(0, 255)
+            fr = np.repeat(bg[:, :, None], 3, 2)
+            if mode == "light":
+                # a smooth spatial gain sweeping across the bar: pure firelight, zero displacement
+                ramp = 1.0 + 0.22 * np.sin(np.linspace(0, 3.14, W) + i / 3.0)[None, :]
+                lay = np.where(sub, tex * ramp, 0).clip(0, 255)
+                fr[sub] = np.repeat(lay[:, :, None], 3, 2)[sub]
+            else:
+                # the bar swells and shrinks about its own centre — brightness held, geometry not
+                k = 1.0 + 0.16 * np.sin(i / 3.0)
+                ys, xs = np.nonzero(sub)
+                cy = ys.mean()
+                yy = np.clip(((np.arange(H) - cy) / k + cy).round().astype(int), 0, H - 1)
+                lay = np.where(sub[yy, :], tex[yy, :], 0).clip(0, 255)
+                m2 = sub[yy, :]
+                fr[m2] = np.repeat(lay[:, :, None], 3, 2)[m2]
+            _I3.fromarray(fr.astype(np.uint8)).save(d / f"{i:03d}.png")
+        vid = tmp / f"{mode}.mp4"
+        subprocess.run(["ffmpeg", "-v", "error", "-framerate", "16", "-i", f"{d}/%03d.png",
+                        "-c:v", "libx264", "-crf", "10", "-pix_fmt", "yuv420p", str(vid), "-y"],
+                       check=True)
+        m = measure(vid, mask=sub)
+        bad = verdict(m)
+        want_clean = mode == "light"
+        good = (not bad) if want_clean else bool(bad)
+        ok &= good
+        print(f"   {name:22s} drift {m['drift_px']:5.1f} px · dev {m['max_dev']:5.2f} · "
+              f"lit_dev {m['lit_dev']:5.2f} -> {'holds' if not bad else 'MOVES'}  "
+              f"{'ok' if good else 'FAIL'}")
+        if mode == "morph":
+            # the point of the whole metric: a shape change must be caught BY lit_dev, not merely
+            # caught by some other check while lit_dev shrugs
+            good2 = m["lit_dev"] > LIMIT["lit_dev"]
+            ok &= good2
+            print(f"   {'  ...and lit_dev is what catches it':22s} "
+                  f"{m['lit_dev']:.2f} > {LIMIT['lit_dev']}  {'ok' if good2 else 'FAIL'}")
+
     # and the counter-gate: a video of nothing moving must FAIL liveness, however still it is
     from PIL import Image as _I2
     d = tmp / "dead"; d.mkdir(exist_ok=True)

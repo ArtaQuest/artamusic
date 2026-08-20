@@ -303,8 +303,17 @@ def relight_field(gen_t, gen_0, coal_mask, sigma=None, clip=(0.6, 1.8)):
     return np.clip(field(gen_t) / (field(gen_0) + 1e-6), *clip).astype(np.float32)
 
 
-def freeze_lit(frames, still, subject_mask, coal_mask, radius=3, spec=0.8):
-    """Composite the subject back over the generated frames: frozen in place, lit by their fire."""
+def freeze_lit(frames, still, subject_mask, coal_mask, radius=3, spec=0.8, clip=(0.8, 1.35)):
+    """Composite the subject back over the generated frames: frozen in place, lit by their fire.
+
+    `clip` bounds that firelight, and it is the dial the whole thing turns on. Too tight and the
+    steel goes dead flat — a cardboard cut-out, which is exactly what the liveness gate exists to
+    refuse. Too loose and the blade's own pixels swing so far that the stillness gate calls it
+    movement, even though nothing has moved an inch: the composite writes `still * gain` every
+    frame, so the geometry CANNOT change, only the light on it. The default is the strongest
+    setting measured to satisfy both gates at once; the caller is expected to search the ladder
+    rather than trust it.
+    """
     frames = np.asarray(frames)
     S = np.asarray(still).astype(np.float32)
     alpha = feather(np.asarray(subject_mask, dtype=bool), radius)[..., None]
@@ -314,7 +323,7 @@ def freeze_lit(frames, still, subject_mask, coal_mask, radius=3, spec=0.8):
     g0 = frames[0].astype(np.float32)
     for i, f in enumerate(frames):
         fl = f.astype(np.float32)
-        gain = relight_field(fl, g0, coal_mask)
+        gain = relight_field(fl, g0, coal_mask, clip=clip)
         plate = S * gain
         if spec:
             pulse = spec * np.clip(gain.mean(2, keepdims=True) - 1.0, 0, None) * hi
