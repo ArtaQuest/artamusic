@@ -46,6 +46,7 @@ PINS = {
     "song_model": "acestep-v15-xl-sft",
     "measure_sha": "17b49399cfd6c24f4070353fc33643ae15e1331d",      # ArtaQuest/artamusic lib/measure.py
     "lyric_profile_sha": "ebee5bf324d8a6cff22ba666825a777c7dfc5c39",  # ArtaQuest/artamusic lib/lyric_profile.py
+    "lyric_sha": "88348bd9e0d21d196cb95c54c20b2943a629c68a",          # ArtaQuest/artamusic song/lyrics_steel.txt + lib/clarity.py
     "asr": "large-v3",
     "image": ("Tongyi-MAI/Z-Image-Turbo", "f332072aa78be7aecdf3ee76d5c247082da564a6"),
     "wan_base": ("Wan-AI/Wan2.2-I2V-A14B-Diffusers", "596658fd9ca6b7b71d5057529bbf319ecbc61d74"),
@@ -165,114 +166,29 @@ urllib.request.urlretrieve(
 sys.path.insert(0, "/tmp")
 import lyric_profile as LP
 
-LYRICS = """[intro]
-Call me Steel, the frozen flame.
-Call me the anvil's claim.
-Call me the oath a hammer swore,
-the iron your fathers bore.
-
-[verse]
-Cut! by the furnace that roared,
-Cut! by the heat it poured,
-Deep in the grain the old fire sleeps,
-What the flame gave, the blade still keeps.
-Cut! born of the crushing blow,
-Cut! born of the blinding glow,
-Folded in dark and drawn to light,
-Beaten until the core ran bright.
-
-[verse]
-Cut! every mark rings true,
-Cut! every blow shows through,
-Watch the temper run down my spine,
-read where the fire signed, line by line.
-Cut! from the water's scream,
-Cut! from the rising steam,
-Hot at the heart, I met the cold —
-What the cold caught, the cold will hold.
-
-[chorus]
-I am the weight you bear.
-I am the oath you swear.
-I am the tempered edge.
-I am the standing pledge.
-The fire is out and cold,
-the forge is lost to dark;
-of all the flame once told,
-I hold the living spark.
-
-[verse]
-Cut! when the horn calls clear,
-Cut! through the choke of fear,
-The smith gave form, the flame gave speed,
-The hand has cause — I am the deed.
-Cut! down the darkened field,
-Cut! through the splintered shield,
-Hold me, and you hold my trust;
-steel keeps the cause, or steel is rust.
-
-[bridge]
-Heat is gone and cold has come;
-deep in the steel the hammers drum.
-Hands may tremble, hearts may hide;
-steel stays steady at your side.
-Grip me tight and swing me through,
-what I keep, I keep for you.
-Bend me far and feel me spring;
-tempered deep — now hear me ring.
-
-[verse]
-Cut! with a willow's give,
-Cut! with a will to live,
-Hard steel shatters, soft steel bends;
-temper is where the trembling ends.
-Cut! and the weight comes due,
-Cut! and the debt bleeds through,
-All that I take, I also keep —
-hearts may forgive; the scars run deep.
-
-[chorus]
-I am the weight you bear.
-I am the oath you swear.
-I am the tempered edge.
-I am the standing pledge.
-The fire is out and cold,
-the forge is lost to dark;
-of all the flame once told,
-I hold the living spark.
-
-[verse]
-Cut! till the sun burns low,
-Cut! till the children grow,
-Watch bearers change and banners fade;
-the hand goes home — I stay the blade.
-Cut! for the oath I keep,
-Cut! while the makers sleep,
-From hand to hand the burden runs,
-passed from your fathers to your sons.
-
-[chorus]
-I am the weight you bear.
-I am the oath you swear.
-I am the tempered edge.
-I am the standing pledge.
-The fire is out and cold,
-the forge is lost to dark;
-of all the flame once told,
-I hold the living spark.
-
-[outro]
-The fire is dead and cold.
-The last hand has fallen still.
-The spark the flame once told,
-I kept — and always will."""
+# ONE COPY OF THE LYRIC, FETCHED AT A PIN. It used to be pasted here as a string literal, and the
+# copy in this notebook had already drifted from song/lyrics_steel.txt in the repo — two texts both
+# claiming to be the lyric, differing in their opening lines, with no way to tell which had been
+# measured by anything. The lyric is a published artifact of this project; it belongs in the repo
+# beside the instruments that judge it, and the notebook should read it the same way it reads them.
+urllib.request.urlretrieve(
+    f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['lyric_sha']}/song/lyrics_steel.txt",
+    "/tmp/lyrics_steel.txt")
+LYRICS = Path("/tmp/lyrics_steel.txt").read_text().strip()
+assert LYRICS.startswith("[intro]") and "[chorus]" in LYRICS, "the fetched lyric is not a lyric"
 
 # The antiphon as BACKING VOCALS. ACE-Step's lyric convention puts backing/choir parts in
 # (parentheses); marking every "Cut!" that way tells the model the choir shouts the stroke and the
 # lead sings the line — the words the gate measures. Off = the choir is free to sing over the lead.
 ANTIPHON_AS_BACKING = True
 if ANTIPHON_AS_BACKING:
-    LYRICS = re.sub(r"^Cut! ", "(Cut!) ", LYRICS, flags=re.M)
+    SHOUT = "Strike!"          # the lyric's antiphon. It was "Cut!" before the rewrite, and a
+    # stale marker here does not fail — it silently marks NOTHING as backing vocal, and the choir
+    # simply never appears in the mix. So assert the word is actually in the lyric.
+    assert re.search(rf"^{re.escape(SHOUT)} ", LYRICS, re.M), (
+        f"no line starts with {SHOUT!r} — the antiphon marker does not match this lyric, and the "
+        f"choir would be silently dropped from the arrangement")
+    LYRICS = re.sub(rf"^{re.escape(SHOUT)} ", f"({SHOUT}) ", LYRICS, flags=re.M)
 (OUT / "STEEL_lyrics.txt").write_text(LYRICS + "\n")
 craft = LP.measure(LYRICS)
 craft_report = {k: (round(v, 2) if isinstance(v, float) else v) for k, v in craft.items()
@@ -285,6 +201,26 @@ print(json.dumps({k: craft_report[k] for k in ("lines", "words", "syllables", "t
                                               "mono_pct", "imper_pct", "invariants")}, indent=1),
       flush=True)
 assert craft_report["invariants"] == ["ok"], "lyric invariants broken"
+
+# CAN A LISTENER FOLLOW IT ON FIRST HEARING? The craft profile above measures the SHAPE of a lyric
+# — syllables per line, monosyllable rate, how often a line opens on a command — and a text can
+# score perfectly on every one of them while being impossible to follow. The previous lyric did
+# exactly that, and the verdict on the finished record was that nobody could tell what the song was
+# about. So the other axis is measured too, and it BLOCKS: everyday vocabulary, lines that show
+# something rather than assert it, and plain subject-verb-object order.
+urllib.request.urlretrieve(
+    f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['lyric_sha']}/lib/clarity.py",
+    "/tmp/clarity.py")
+import clarity as CL
+assert CL.selftest(), "the clarity instrument fails its own selftest — its numbers mean nothing"
+clear = CL.measure(LYRICS)
+clear_bad = CL.verdict(clear)
+craft_report["clarity"] = {k: round(v, 2) if isinstance(v, float) else v for k, v in clear.items()}
+craft_report["clarity"]["floor"] = CL.FLOOR
+craft_report["clarity"]["verdict"] = clear_bad or ["clear enough to follow on first listen"]
+(WORK / "lyric_craft.json").write_text(json.dumps(craft_report, indent=2))
+print("clarity:", json.dumps(craft_report["clarity"]), flush=True)
+assert not clear_bad, "the lyric is not comprehensible on first listen: " + "; ".join(clear_bad)
 
 CAPTION = ("Dark chant anthem. Pounding war drums and anvil strikes on the beat, massive unison "
            "male chant choir answering a deep gravelly lead vocal, low strings and war horns, "
