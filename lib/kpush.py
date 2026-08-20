@@ -284,7 +284,9 @@ if __name__ == "__main__":
     p.add_argument("--title"); p.add_argument("--py"); p.add_argument("--public", action="store_true")
     p.add_argument("--kernel-source", action="append", default=[],
                    help="mount another kernel's OUTPUT under /kaggle/input (must be public)")
-    p.add_argument("--internet", action="store_true", help="wheelhouse builder ONLY")
+    p.add_argument("--internet", action="store_true",
+                   help="the kernel may reach the network. Needed by ANYTHING that pip installs "
+                        "or pulls weights at runtime — not just the wheelhouse builder")
     p.add_argument("--cpu", action="store_true", help="enable_gpu=false — zero quota")
     a = p.parse_args()
     if a.cmd == "push":
@@ -302,6 +304,17 @@ if __name__ == "__main__":
         if os.environ.get("AQ_KAGGLE_SHAPE"):
             meta["machine_shape"] = os.environ["AQ_KAGGLE_SHAPE"]
         (f / "kernel-metadata.json").write_text(json.dumps(meta, indent=2))
+        # A KERNEL THAT REACHES THE NETWORK WITH THE NETWORK OFF FAILS AT ITS FIRST FETCH, and
+        # the traceback is a DNS error twenty frames deep that reads like a Kaggle outage rather
+        # than a flag you did not pass. It cost a run: six minutes in, "Temporary failure in name
+        # resolution", on a notebook whose whole first cell is a pip install. The source says
+        # plainly whether it needs the network, so ask it rather than the operator's memory.
+        src = (HERE / a.py).read_text()
+        needs = [n for n in ("pip install", "snapshot_download", "hf_hub_download", "urlretrieve",
+                             "requests.get", "urlopen", "git clone") if n in src]
+        if needs and not a.internet:
+            sys.exit(f"refusing to push: {a.py} uses {', '.join(needs)} but --internet was not "
+                     f"given, so the kernel will fail at its first fetch with a DNS error")
         r = call(api().kernels_push, str(f), timeout=None, acc=None)
         print("error:", getattr(r, "error", None), "| url:", getattr(r, "url", None))
     elif a.cmd == "status":
