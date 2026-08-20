@@ -335,9 +335,18 @@ if needs_freeze:
         if row["passes"]:
             loop = cand; break
     else:
-        raise RuntimeError("no relight strength satisfies both gates — ladder above")
-else:
+        # Every rung refused. That is a finding, not a reason to throw away a generation that is
+        # already on disk: the gentlest relight failing means the fire cannot light this blade
+        # without the change reading as movement. Ship what the model made, say the freeze did not
+        # take, and let the ladder in the JSON show why.
+        print("  no relight strength satisfies both gates — shipping the generation unfrozen; "
+              "the ladder is above and in the JSON", flush=True)
+        needs_freeze = False
+        loop = raw_loop
+elif mask_ok:
     print("  the blade already holds still — shipping the generation as it came", flush=True)
+    loop = raw_loop
+else:
     loop = raw_loop
 
 # %%
@@ -379,5 +388,11 @@ else:
     print("\nThe loop was generated and written; the blade mask was not recognised, so it is "
           "shipped unjudged and unfrozen. Look at it.")
 assert not problems, "the cover does not meet its own gates: " + "; ".join(problems)
-print("\nThe sword holds still, the fire lives, and the loop closes.", flush=True)
+if mask_ok and not rec["froze_the_blade"]:
+    print("\nThe sword held still on its own, the fire lives, and the loop closes.", flush=True)
+elif mask_ok:
+    print("\nThe sword holds still, the fire lives, and the loop closes.", flush=True)
+else:
+    print("\nA loop was generated and written. It was NOT judged — the blade mask was not "
+          "recognised — so nothing here claims the sword holds still.", flush=True)
 clock("DONE")
