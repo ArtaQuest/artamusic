@@ -99,45 +99,43 @@ clock("environment ready")
 # a defect seen in an actual take of this cover across the last three rounds.
 
 # %%
-# TWO THINGS THE MODEL WAS NEVER TOLD, EACH LOST A ROUND.
+# THE SHOT IS THE HAMMERING NOW, not a sword lying still — so the subject is SUPPOSED to move, and
+# the freeze that guaranteed a motionless blade would destroy the very thing being asked for. It is
+# switched off by HOLD_SUBJECT below, along with the stillness gates, which measure a property this
+# shot does not want. The liveness counter-gate stays: the fire must still be alive.
 #
-# The sword: the first video take was more photographic than anything the image model produced —
-# real charcoal, real flame, real ash — and its subject was a flat featureless bar. The anatomy
-# language that fixed exactly this for the stills was never carried across when the still was
-# dropped. It is here now.
-#
-# The setting: rewriting the prompt to add that anatomy, I deleted "of a forge at night" — and
-# "forge" survived only as the adjective in "forged sword", so nothing named the room at all. Both
-# takes duly came back as a campfire on open ground with ash scattered around it, which is exactly
-# what "a bed of coals" means with no building around it. The forge is named explicitly now, as an
-# interior, with a hearth that contains the fire and an anvil beside it — and the negative prompt
-# names the campfire, because that is what the model reaches for otherwise.
+# What carries over is the lesson that cost two rounds — the model renders what is NAMED and
+# invents what is not. A sword with no described anatomy came back as a featureless bar; naming the
+# crossguard, the grip and the pommel fixed it outright, visibly, in one run. So the hammer, the
+# tongs and the anvil are each described, the forge interior is named (a bed of coals with no
+# building around it renders a campfire — twice, correctly), and no face is asked for: hands and
+# forearms only, because faces and fingers are where these models fail most visibly.
+HOLD_SUBJECT = False
+
 PROMPT = (
-    "Locked-off static camera on a tripod. Real documentary footage shot on 65mm Kodak Vision3 "
-    "500T film at T2.8, inside the dark stone interior of a blacksmith's forge at night — a "
-    "cavernous room of soot-blackened brick and heavy timber, the far walls lost in blackness. "
-    "One great forged sword — a broad double-edged blade with a straight crossguard, a "
-    "leather-wrapped grip and a round pommel, unmistakably a sword and the largest object in the "
-    "frame — lies motionless across the raised stone hearth on a bed of white-hot charcoal, "
-    "running corner to corner of the frame on a diagonal, with a black iron anvil beside it. The "
-    "coals are irregular broken lumps, cracked and glowing from within, contained in the hearth. "
-    "The fire breathes: embers pulse brighter and dimmer, small flames lick up along the blade's "
-    "edge and fall back, sparks rise and die, thin grey smoke drifts upward through a single shaft "
-    "of light and curls in the dark air. The sword itself does not move at all — it lies perfectly "
-    "still while the firelight plays over the polished steel, hammer marks and the hardening line "
-    "catching the light. Deep black shadow, one warm light source from the coals below, high "
-    "dynamic range, visible film grain, natural halation on the hot metal, shallow depth of field. "
-    "Photographic, solemn, monumental.")
+    "Locked-off static camera on a tripod, close on a heavy black iron anvil inside the dark stone "
+    "interior of a blacksmith's forge at night — soot-blackened brick, the far walls lost in "
+    "blackness, the hearth glowing orange behind. A sword blade, heated to glowing orange-white "
+    "along its length, lies across the anvil gripped in a pair of long iron tongs. A big "
+    "blacksmith's hammer swings down and strikes the hot steel: on each impact a burst of bright "
+    "sparks explodes outward and showers down across the anvil and the floor, the struck metal "
+    "flares yellow-white, and the hammer lifts and comes down again in a steady, powerful rhythm. "
+    "Only the smith's gloved hands and bare forearms are in frame, no face and no full body. "
+    "Shot on 65mm Kodak Vision3 500T film at T2.8, deep black shadow, the only light coming from "
+    "the glowing steel and the hearth, high dynamic range, visible film grain, natural halation on "
+    "the hot metal, sparks in sharp focus, slight motion blur on the hammer head. Photographic, "
+    "epic, monumental.")
 
 NEG = (
-    "campfire, bonfire, fire pit, outdoors, open ground, forest, field, night sky, camping, "
-    "scattered ash on soil, barbecue, barbecue briquettes, uniform charcoal blocks, "
-    "machete, flat metal bar, featureless blade, knife with no crossguard, sword with no handle, "
+    "face, portrait, full body, whole person, crowd, "
+    "campfire, bonfire, fire pit, outdoors, open ground, forest, night sky, scattered ash on soil, "
+    "barbecue, barbecue briquettes, "
+    "machete, flat metal bar, featureless blade, knife with no crossguard, "
     "3d render, cgi, computer graphics, video game, unreal engine, octane render, plastic, smooth "
     "plastic surfaces, illustration, drawing, painting, cartoon, anime, concept art, airbrushed, "
-    "waxy, artificial studio lighting, flat even lighting, washed out, low contrast, oversaturated "
-    "orange, camera motion, zoom, pan, handheld shake, the sword moving or sliding or rotating, "
-    "warping metal, morphing shapes, text, watermark, logo, blurry, low resolution")
+    "waxy, artificial studio lighting, flat even lighting, washed out, low contrast, "
+    "camera motion, zoom, pan, handheld shake, warping metal, morphing shapes, extra fingers, "
+    "deformed hands, text, watermark, logo, blurry, low resolution")
 (WORK / "prompt.json").write_text(json.dumps({"prompt": PROMPT, "negative": NEG}, indent=2))
 print(f"[prompt] {PROMPT[:160]}…\n[negative] {NEG[:120]}…", flush=True)
 
@@ -313,7 +311,10 @@ print(f"  blade mask {mask_pct:.2f}% of frame · coals {100*float(coals.mean()):
 # A mask that is a sliver or half the picture is not a sword, and every number keyed on it would be
 # meaningless rather than wrong-looking. Say so and ship the generation unjudged rather than
 # inventing a verdict.
-mask_ok = 0.15 <= mask_pct <= 12.0 and bool(coals.any())
+mask_ok = HOLD_SUBJECT and 0.15 <= mask_pct <= 12.0 and bool(coals.any())
+if not HOLD_SUBJECT:
+    print("  HOLD_SUBJECT is off — this shot IS the hammering, so the subject is meant to move. "
+          "The freeze and the stillness gates are skipped by design, not by failure.", flush=True)
 if not mask_ok:
     print(f"  the blade mask is implausible at {mask_pct:.2f}% — the freeze and the stillness "
           f"numbers are being SKIPPED, and the loop ships as generated", flush=True)
@@ -413,6 +414,7 @@ if mask_ok and not rec["froze_the_blade"]:
 elif mask_ok:
     print("\nThe sword holds still, the fire lives, and the loop closes.", flush=True)
 else:
-    print("\nA loop was generated and written. It was NOT judged — the blade mask was not "
-          "recognised — so nothing here claims the sword holds still.", flush=True)
+    print("\nA loop was generated and written." + ("" if HOLD_SUBJECT else
+          " This shot is the hammering: the subject is MEANT to move, so no stillness claim is made "
+          "about it. The fire was still required to be alive."), flush=True)
 clock("DONE")
