@@ -138,6 +138,11 @@ clock("environment ready")
 # coals came out as barbecue briquettes in all four, square and uniform. The brief never said the
 # blade had to be the biggest thing in the picture, never described a sword's anatomy, and never
 # said what a coal looks like. It says all three now.
+# ⚠ THIS BRIEF BLOCK IS DUPLICATED in stages/cover_v2.py and stages/steel_record.py, and the two
+# must be edited together. It is the same hazard that bit the lyric, which lived here as a pasted
+# string AND in the repo and had already drifted apart with no way to tell which one had been
+# measured. The lyric was fixed by fetching it at a pin; this deserves the same and has not had it
+# yet. Current shared text sha256[:12] = 310423fd4eda — if you change one copy, change the other.
 SCENE = ("A cinematic still from a 70mm feature film. One great forged sword — a broad "
          "double-edged blade with a straight crossguard and a leather-wrapped grip, unmistakably a "
          "sword and the largest object in the frame — lies across a bed of white-hot coals in the "

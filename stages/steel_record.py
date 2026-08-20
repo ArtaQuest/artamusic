@@ -307,6 +307,11 @@ BPM, KEYSCALE = 100, "F minor"   # match the conditioning reference; a key fight
 # what is deliberately left empty. Everything the model was previously free to invent — how big the
 # blade is, what a sword looks like, what a coal looks like, what else is in the room — is now
 # stated, because each of those was got wrong when it was left unsaid.
+# ⚠ THIS BRIEF BLOCK IS DUPLICATED in stages/cover_v2.py and stages/steel_record.py, and the two
+# must be edited together. It is the same hazard that bit the lyric, which lived here as a pasted
+# string AND in the repo and had already drifted apart with no way to tell which one had been
+# measured. The lyric was fixed by fetching it at a pin; this deserves the same and has not had it
+# yet. Current shared text sha256[:12] = 310423fd4eda — if you change one copy, change the other.
 SCENE = ("A cinematic still from a 70mm feature film. One great forged sword — a broad "
          "double-edged blade with a straight crossguard and a leather-wrapped grip, unmistakably a "
          "sword and the largest object in the frame — lies across a bed of white-hot coals in the "
