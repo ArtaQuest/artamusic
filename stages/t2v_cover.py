@@ -50,7 +50,7 @@ PINS = {
     "wan_gguf": ("QuantStack/Wan2.2-T2V-A14B-GGUF", "73eafba53a1a8f29254e4c77f92e74ea27d7cd6f"),
     "wan_high": "HighNoise/Wan2.2-T2V-A14B-HighNoise-Q4_K_M.gguf",
     "wan_low": "LowNoise/Wan2.2-T2V-A14B-LowNoise-Q4_K_M.gguf",
-    "tools_sha": "5216c42c2f61923451978174e0e72fc7ea5a6a20",
+    "tools_sha": "e43b03d4ddc8810e67f467f52feef9ce65ce9131",
 }
 
 def sh(c, quiet=False):
@@ -77,13 +77,14 @@ sh("free -g | head -2; df -h /tmp | tail -1; nproc")
 
 # ── the measuring instruments, pinned, and proven before anything expensive runs ──────────
 TOOLS = TMP / "tools"; TOOLS.mkdir(exist_ok=True)
-for _f in ("stillness.py", "freeze.py"):
+for _f in ("stillness.py", "freeze.py", "looper.py"):
     urllib.request.urlretrieve(
         f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['tools_sha']}/lib/{_f}",
         str(TOOLS / _f))
 sys.path.insert(0, str(TOOLS))
-import stillness as S, freeze as F
+import stillness as S, freeze as F, looper as L
 assert S.selftest(), "the stillness instrument fails its own selftest — no number here is trustworthy"
+assert L.selftest(), "the cycle finder fails its own selftest — no cut it proposes is trustworthy"
 clock("environment ready")
 
 # %% [markdown]
@@ -111,6 +112,7 @@ clock("environment ready")
 # building around it renders a campfire — twice, correctly), and no face is asked for: hands and
 # forearms only, because faces and fingers are where these models fail most visibly.
 HOLD_SUBJECT = False
+CYCLE = {}
 
 PROMPT = (
     "Locked-off static camera on a tripod, close on a heavy black iron anvil inside the dark stone "
@@ -286,11 +288,38 @@ def encode(fr, base):
     sh(f"ffmpeg -v error -i '{base}_raw.mp4' -vf scale=1080:1080:flags=lanczos -c:v libvpx-vp9 "
        f"-crf 33 -b:v 0 -row-mt 1 -cpu-used 1 -pix_fmt yuv420p -an '{base}_1080.webm' -y", quiet=True)
 
+def dissolve(fr, xf):
+    if xf <= 0 or len(fr) < 2 * xf + 2:
+        return fr
+    w = (np.arange(1, xf + 1) / (xf + 1))[:, None, None, None]
+    blend = ((1 - w) * fr[-xf:].astype(np.float32) + w * fr[:xf].astype(np.float32)).round().astype(np.uint8)
+    return np.concatenate([fr[xf:len(fr) - xf], blend])
+
+
 def close_loop(fr):
-    L = fr[:-1]
-    w = (np.arange(1, XF + 1) / (XF + 1))[:, None, None, None]
-    blend = ((1 - w) * L[-XF:].astype(np.float32) + w * L[:XF].astype(np.float32)).round().astype(np.uint8)
-    return np.concatenate([L[XF:len(L) - XF], blend])
+    """Find the cycle if there is one; dissolve if there is not; say which.
+
+    A slow fire has no cycle, and a dissolve is the honest way to close it. A HAMMER does have one
+    — rise, fall, strike — and dissolving a hammer at the top of its swing into one at the bottom
+    is a morph that reads as a morph. So the clip is searched for its best cut point first, and the
+    cut is only taken when it is genuinely less visible than an ordinary frame-to-frame step.
+    Measured on the fire clips this pipeline has already made, the search correctly finds NOTHING
+    (1.26–1.74x a typical step) rather than inventing a cycle, which is why its answer can be
+    trusted when it does find one.
+    """
+    global CYCLE
+    CYCLE = L.cycle_report(fr, min_frames=max(24, len(fr) // 3))
+    print(f"  cycle search: {CYCLE['start']}..{CYCLE['end']} ({CYCLE['frames']} frames) · "
+          f"seam {CYCLE['seam_vs_typical']}x a normal step · whole clip "
+          f"{CYCLE['whole_vs_typical']}x", flush=True)
+    if CYCLE["seam_vs_typical"] < 1.0:
+        CYCLE["used"] = "cycle"
+        print(f"  taking the cycle — a cut there is less visible than an ordinary frame step",
+              flush=True)
+        return dissolve(fr[CYCLE["start"]:CYCLE["end"] + 1], 3)
+    CYCLE["used"] = "dissolve"
+    print("  no cycle worth cutting on — closing the whole clip with a dissolve", flush=True)
+    return dissolve(fr[:-1], XF)
 
 still = frames[0]
 raw_loop = close_loop(frames)
@@ -388,7 +417,7 @@ rec = {"model": f"Wan2.2-T2V-A14B Q4_K_M ({GREPO})", "hashes": HASHES, "seed": S
                   f"{XF}-frame dissolve"
                   + ("; the sword composited back frozen and re-lit because it drifted"
                      if needs_freeze else "; the sword held still on its own and was left alone")),
-       "froze_the_blade": needs_freeze, "relight_ladder": ladder,
+       "froze_the_blade": needs_freeze, "relight_ladder": ladder, "cycle": CYCLE,
        "as_generated": raw_m, "as_generated_alive": raw_a,
        "frozen": fin_m, "alive": fin_a}
 rec["mask_ok"] = mask_ok
