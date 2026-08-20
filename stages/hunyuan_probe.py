@@ -137,6 +137,11 @@ mem("transformer sharded, vae on host")
 # at the real size before anything is committed.
 
 # %%
+# A LADDER, BECAUSE THE WEIGHTS CANNOT GET SMALLER. 15.5 GB across two 14.56 GiB cards is ~7.75 GB
+# of weights per card by arithmetic, so the only thing left to trade is activations. Two steps ran
+# fine at 480x480x61 and the full run then peaked ~1.9 GB over — so the run finds its own ceiling
+# instead of me guessing it, and records which rung it landed on.
+SHAPES = [(480, 61), (480, 45), (448, 45), (384, 45)]
 H = W = 480
 NF = 61
 def run(steps):
@@ -160,8 +165,30 @@ def decode(lat):
         out = pipe.vae.decode(lat.to(dev, pipe.vae.dtype), return_dict=False)[0]
     return pipe.video_processor.postprocess_video(out, output_type="np")[0]
 
-t0 = time.time(); _probe = run(2); per_step = (time.time() - t0) / 2
-del _probe; gc.collect(); torch.cuda.empty_cache()
+# attention slicing if this transformer offers it — it trades a little speed for a much smaller
+# attention peak, which is exactly the thing that is 1.9 GB over
+for _fn in ("enable_attention_slicing", "set_attention_slice"):
+    if hasattr(pipe, _fn):
+        try:
+            getattr(pipe, _fn)("auto" if _fn == "enable_attention_slicing" else 1)
+            print(f"  {_fn} on", flush=True); break
+        except Exception as _e:
+            print(f"  {_fn} unavailable: {str(_e)[:60]}", flush=True)
+
+per_step = None
+for (px, nf) in SHAPES:
+    H = W = px; NF = nf
+    try:
+        t0 = time.time(); _probe = run(2); per_step = (time.time() - t0) / 2
+        del _probe; gc.collect(); torch.cuda.empty_cache()
+        print(f"  {px}x{px}x{nf} fits · {per_step:.0f} s/step", flush=True)
+        break
+    except torch.cuda.OutOfMemoryError:
+        print(f"  {px}x{px}x{nf} OOM", flush=True)
+        gc.collect(); torch.cuda.empty_cache()
+assert per_step is not None, (
+    "HunyuanVideo 1.5 does not fit a T4 pair at any of " + str(SHAPES) + " even sharded. The "
+    "weights alone are 7.75 GB a card; there is nothing left to give. This is the answer.")
 mem("after 2 steps")
 print(f"\n  {per_step:.0f} s/step at {H}×{W}×{NF} WITH guidance", flush=True)
 BUDGET_S = 130 * 60
@@ -169,9 +196,19 @@ STEPS = max(8, min(30, int(BUDGET_S / max(per_step, 1e-6))))
 print(f"  → {STEPS} steps ≈ {per_step*STEPS/60:.0f} min", flush=True)
 
 # %%
-t0 = time.time()
-lat = run(STEPS)
-gen_s = time.time() - t0
+# The two-step probe fitting does not guarantee thirty steps will: the first attempt cleared the
+# probe and then peaked over on the real run. So step down the ladder again on OOM rather than lose
+# the session, keeping whatever shape actually completes.
+lat = None
+for (px, nf) in [(H, NF)] + [s for s in SHAPES if (s[0], s[1]) != (H, NF)]:
+    H = W = px; NF = nf
+    try:
+        t0 = time.time(); lat = run(STEPS); gen_s = time.time() - t0
+        print(f"  rendered at {px}x{px}x{nf}", flush=True); break
+    except torch.cuda.OutOfMemoryError:
+        print(f"  {px}x{px}x{nf} OOM on the full {STEPS}-step run — stepping down", flush=True)
+        gc.collect(); torch.cuda.empty_cache()
+assert lat is not None, "no shape completed the full run; the ladder is above"
 arr = (np.clip(decode(lat.frames), 0, 1) * 255).round().astype(np.uint8)
 print(f"  {len(arr)} frames in {gen_s/60:.1f} min", flush=True)
 Image.fromarray(arr[0]).save(OUT / "frame0.png")
