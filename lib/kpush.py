@@ -201,6 +201,25 @@ def precheck_source(py):
         break
 
 
+    # A HUGGING FACE REVISION PIN THAT DOES NOT EXIST. Twice in one day a 40-character sha was
+    # written out from a 12-character print — the API truncates, and the eye fills in the rest.
+    # Both times the tail was wrong, and both times it was caught only because someone happened to
+    # check by hand; unchecked it downloads nothing, forty minutes into a session, with a message
+    # about a repository rather than about a typo. The API says plainly whether a revision exists.
+    import re as _re3, urllib.request as _ur3
+    _seen = set()
+    for _repo, _rev in _re3.findall(
+            r'\(\s*"([\w.-]+/[\w.-]+)"\s*,\s*"([0-9a-f]{40})"\s*\)', Path(_src).read_text()):
+        if (_repo, _rev) in _seen:
+            continue
+        _seen.add((_repo, _rev))
+        try:
+            _ur3.urlopen(_ur3.Request(f"https://huggingface.co/api/models/{_repo}/revision/{_rev}",
+                                      headers={"User-Agent": "aq"}), timeout=30).read(1)
+        except Exception as _e:
+            raise RuntimeError(f"{py}: {_repo} has no revision {_rev[:12]}… ({_e}) — refusing to "
+                               f"push a kernel that will fail its own download")
+
     # A PIN THAT SERVES OLD CODE IS A SILENT WRONG ANSWER. The notebook fetches its instruments
     # and its lyric from this repo at a commit sha. Edit one of those files, forget to push or to
     # bump the sha, and the kernel runs the version you no longer have — no error, no warning, just
