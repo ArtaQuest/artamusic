@@ -182,6 +182,7 @@ assert LYRICS.startswith("[intro]") and "[chorus]" in LYRICS, "the fetched lyric
 # (parentheses); marking every "Cut!" that way tells the model the choir shouts the stroke and the
 # lead sings the line — the words the gate measures. Off = the choir is free to sing over the lead.
 ANTIPHON_AS_BACKING = True
+LYRIC_TEXT = LYRICS                 # the words, as written and as measured
 if ANTIPHON_AS_BACKING:
     SHOUT = "Strike!"          # the lyric's antiphon. It was "Cut!" before the rewrite, and a
     # stale marker here does not fail — it silently marks NOTHING as backing vocal, and the choir
@@ -191,12 +192,20 @@ if ANTIPHON_AS_BACKING:
         f"choir would be silently dropped from the arrangement")
     LYRICS = re.sub(rf"^{re.escape(SHOUT)} ", f"({SHOUT}) ", LYRICS, flags=re.M)
 (OUT / "STEEL_lyrics.txt").write_text(LYRICS + "\n")
-craft = LP.measure(LYRICS)
+
+# MEASURE THE WORDS, NOT THE ARRANGEMENT MARKUP. The parentheses are an instruction to the
+# generator about who sings a line, not a change to the line — the choir shouts the same word the
+# lead would. But the clarity instrument treats a parenthesised line as not-the-lead and drops it,
+# which shrinks its denominator: marking fourteen lines as choir moved the inversion rate from
+# 4.3% to 5.4% and would have failed this run's own gate on a lyric that passes. So both
+# instruments read LYRIC_TEXT, and the marked-up version is what goes to the model and ships as
+# the lyric sheet.
+craft = LP.measure(LYRIC_TEXT)
 craft_report = {k: (round(v, 2) if isinstance(v, float) else v) for k, v in craft.items()
                 if k not in ("long_lines", "short_lines")}
 craft_report["long_lines"] = craft["long_lines"]; craft_report["short_lines"] = craft["short_lines"]
 craft_report["target"] = LP.TARGET
-craft_report["invariants"] = LP.check_invariants(LYRICS, "steel") or ["ok"]
+craft_report["invariants"] = LP.check_invariants(LYRIC_TEXT, "steel") or ["ok"]
 (WORK / "lyric_craft.json").write_text(json.dumps(craft_report, indent=2))
 print(json.dumps({k: craft_report[k] for k in ("lines", "words", "syllables", "tight_pct",
                                               "mono_pct", "imper_pct", "invariants")}, indent=1),
@@ -214,7 +223,7 @@ urllib.request.urlretrieve(
     "/tmp/clarity.py")
 import clarity as CL
 assert CL.selftest(), "the clarity instrument fails its own selftest — its numbers mean nothing"
-clear = CL.measure(LYRICS)
+clear = CL.measure(LYRIC_TEXT)
 clear_bad = CL.verdict(clear)
 craft_report["clarity"] = {k: round(v, 2) if isinstance(v, float) else v for k, v in clear.items()}
 craft_report["clarity"]["floor"] = CL.FLOOR
