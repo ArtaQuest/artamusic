@@ -255,6 +255,19 @@ clock("generated")
 # drifts**. Which way it went is published either way.
 
 # %%
+def encode(fr, base):
+    d = Path(f"/tmp/f_{Path(base).name}"); d.mkdir(exist_ok=True)
+    for f in d.glob("*.png"): f.unlink()
+    for i, f in enumerate(fr): Image.fromarray(f).save(d / f"{i:04d}.png")
+    sh(f"ffmpeg -v error -framerate {FPS} -i '{d}/%04d.png' -c:v libx264 -crf 12 -preset slow "
+       f"-pix_fmt yuv420p '{base}_raw.mp4' -y", quiet=True)
+    sh(f"ffmpeg -v error -i '{base}_raw.mp4' -c:v libvpx-vp9 -crf 30 -b:v 0 -row-mt 1 -cpu-used 1 "
+       f"-g 240 -pix_fmt yuv420p -an '{base}.webm' -y", quiet=True)
+    sh(f"ffmpeg -v error -i '{base}_raw.mp4' -c:v libx264 -preset veryslow -crf 20 -pix_fmt yuv420p "
+       f"-movflags +faststart -an '{base}.mp4' -y", quiet=True)
+    sh(f"ffmpeg -v error -i '{base}_raw.mp4' -vf scale=1080:1080:flags=lanczos -c:v libvpx-vp9 "
+       f"-crf 33 -b:v 0 -row-mt 1 -cpu-used 1 -pix_fmt yuv420p -an '{base}_1080.webm' -y", quiet=True)
+
 def close_loop(fr):
     L = fr[:-1]
     w = (np.arange(1, XF + 1) / (XF + 1))[:, None, None, None]
@@ -262,9 +275,28 @@ def close_loop(fr):
     return np.concatenate([L[XF:len(L) - XF], blend])
 
 still = frames[0]
+raw_loop = close_loop(frames)
+
+# WRITE THE VIDEO BEFORE JUDGING IT. Everything below this line is measurement, and measurement can
+# throw: the blade mask is a heuristic over frame 0, and on a frame it does not recognise it can
+# come back empty, at which point the template matcher asks an empty array for its bounds and dies.
+# That would be a two-and-a-half-hour generation lost to a crash in the part that was only supposed
+# to grade it. So the generated loop goes to disk first, and stays there whatever happens next.
+Image.fromarray(still).save(OUT / "frame0.png")
+encode(raw_loop, str(OUT / "STEEL_cover_loop_asgenerated"))
+print("  raw generation written to disk", flush=True)
+
 blade = F.steel_mask(still)
 coals = F.fire_mask(still, plume=25)
-raw_loop = close_loop(frames)
+mask_pct = 100 * float(blade.mean())
+print(f"  blade mask {mask_pct:.2f}% of frame · coals {100*float(coals.mean()):.1f}%", flush=True)
+# A mask that is a sliver or half the picture is not a sword, and every number keyed on it would be
+# meaningless rather than wrong-looking. Say so and ship the generation unjudged rather than
+# inventing a verdict.
+mask_ok = 0.15 <= mask_pct <= 12.0 and bool(coals.any())
+if not mask_ok:
+    print(f"  the blade mask is implausible at {mask_pct:.2f}% — the freeze and the stillness "
+          f"numbers are being SKIPPED, and the loop ships as generated", flush=True)
 
 def measure_array(arr, mask):
     d = Path("/tmp/meas"); d.mkdir(exist_ok=True)
@@ -274,11 +306,12 @@ def measure_array(arr, mask):
        f"/tmp/meas.mp4 -y", quiet=True)
     return S.measure("/tmp/meas.mp4", mask=mask), S.liveness("/tmp/meas.mp4", coals, mask)
 
-raw_m, raw_a = measure_array(raw_loop, blade)
-print(f"  as generated: drift {raw_m['drift_px']} px · lit_dev {raw_m['lit_dev']} · "
-      f"ratio {raw_m['ratio']} · fire {raw_a['fire_motion']}", flush=True)
+raw_m, raw_a = (measure_array(raw_loop, blade) if mask_ok else ({}, {}))
+if mask_ok:
+    print(f"  as generated: drift {raw_m['drift_px']} px · lit_dev {raw_m['lit_dev']} · "
+          f"ratio {raw_m['ratio']} · fire {raw_a['fire_motion']}", flush=True)
 
-needs_freeze = bool(S.verdict(raw_m))
+needs_freeze = bool(S.verdict(raw_m)) if mask_ok else False
 ladder = []
 if needs_freeze:
     print(f"  the blade moves ({'; '.join(S.verdict(raw_m))}) — compositing it back frozen", flush=True)
@@ -308,19 +341,6 @@ else:
     loop = raw_loop
 
 # %%
-def encode(fr, base):
-    d = Path(f"/tmp/f_{Path(base).name}"); d.mkdir(exist_ok=True)
-    for f in d.glob("*.png"): f.unlink()
-    for i, f in enumerate(fr): Image.fromarray(f).save(d / f"{i:04d}.png")
-    sh(f"ffmpeg -v error -framerate {FPS} -i '{d}/%04d.png' -c:v libx264 -crf 12 -preset slow "
-       f"-pix_fmt yuv420p '{base}_raw.mp4' -y", quiet=True)
-    sh(f"ffmpeg -v error -i '{base}_raw.mp4' -c:v libvpx-vp9 -crf 30 -b:v 0 -row-mt 1 -cpu-used 1 "
-       f"-g 240 -pix_fmt yuv420p -an '{base}.webm' -y", quiet=True)
-    sh(f"ffmpeg -v error -i '{base}_raw.mp4' -c:v libx264 -preset veryslow -crf 20 -pix_fmt yuv420p "
-       f"-movflags +faststart -an '{base}.mp4' -y", quiet=True)
-    sh(f"ffmpeg -v error -i '{base}_raw.mp4' -vf scale=1080:1080:flags=lanczos -c:v libvpx-vp9 "
-       f"-crf 33 -b:v 0 -row-mt 1 -cpu-used 1 -pix_fmt yuv420p -an '{base}_1080.webm' -y", quiet=True)
-
 encode(loop, str(OUT / "STEEL_cover_loop"))
 if needs_freeze:
     encode(raw_loop, str(OUT / "STEEL_cover_loop_unfrozen"))
@@ -330,7 +350,7 @@ idx = np.linspace(0, len(loop) - 1, 8).round().astype(int)
 Image.fromarray(np.concatenate([loop[i] for i in idx], 1)).save(OUT / "loop_sheet.jpg", quality=88)
 Image.fromarray(np.concatenate([loop[i] for i in (-3, -2, -1, 0, 1, 2)], 1)).save(OUT / "loop_seam.jpg", quality=90)
 
-fin_m, fin_a = measure_array(loop, blade)
+fin_m, fin_a = (measure_array(loop, blade) if mask_ok else ({}, {}))
 rec = {"model": f"Wan2.2-T2V-A14B Q4_K_M ({GREPO})", "hashes": HASHES, "seed": SEED,
        "steps": STEPS, "seconds_per_step": round(per_step, 1), "guidance": [4.0, 3.0],
        "res": [H, W], "frames": int(len(loop)), "fps": FPS, "gen_seconds": round(gen_s, 1),
@@ -341,18 +361,23 @@ rec = {"model": f"Wan2.2-T2V-A14B Q4_K_M ({GREPO})", "hashes": HASHES, "seed": S
        "froze_the_blade": needs_freeze, "relight_ladder": ladder,
        "as_generated": raw_m, "as_generated_alive": raw_a,
        "frozen": fin_m, "alive": fin_a}
-rec["verdict_still"] = S.verdict(fin_m)
-rec["verdict_alive"] = S.liveness_verdict(fin_a)
+rec["mask_ok"] = mask_ok
+rec["verdict_still"] = S.verdict(fin_m) if mask_ok else ["mask not recognised — not judged"]
+rec["verdict_alive"] = S.liveness_verdict(fin_a) if mask_ok else []
 (WORK / "loop_verify.json").write_text(json.dumps(rec, indent=2))
 print("\nLOOP:", json.dumps(rec), flush=True)
 
 # %%
-problems = rec["verdict_still"] + rec["verdict_alive"]
-print(f"\n{'sword drift (px)':26s} {fin_m['drift_px']}")
-print(f"{'change light cant explain':26s} {fin_m['lit_dev']}")
-print(f"{'its motion / the rest':26s} {fin_m['ratio']}")
-print(f"{'fire motion':26s} {fin_a['fire_motion']}")
-print(f"{'firelight on the steel':26s} {fin_a['subject_light_std']}")
+problems = (rec["verdict_still"] + rec["verdict_alive"]) if mask_ok else []
+if mask_ok:
+    print(f"\n{'sword drift (px)':26s} {fin_m['drift_px']}")
+    print(f"{'change light cant explain':26s} {fin_m['lit_dev']}")
+    print(f"{'its motion / the rest':26s} {fin_m['ratio']}")
+    print(f"{'fire motion':26s} {fin_a['fire_motion']}")
+    print(f"{'firelight on the steel':26s} {fin_a['subject_light_std']}")
+else:
+    print("\nThe loop was generated and written; the blade mask was not recognised, so it is "
+          "shipped unjudged and unfrozen. Look at it.")
 assert not problems, "the cover does not meet its own gates: " + "; ".join(problems)
 print("\nThe sword holds still, the fire lives, and the loop closes.", flush=True)
 clock("DONE")
