@@ -52,7 +52,7 @@ PINS = {
                  "338fb8eedd8f485c9188cf1b1de541721fc81d66"),
     "wan_high": "high_noise_1030/wan2.2_i2v_A14b_high_noise_lightx2v_4step_1030-Q4_K_M.gguf",
     "wan_low": "low_noise/wan2.2_i2v_A14b_low_noise_lightx2v_4step-Q4_K_M.gguf",
-    "tools_sha": "3bceffe194ac0029a8c212480be7c40bf4550519",  # ArtaQuest/artamusic lib/{stillness,freeze}.py
+    "tools_sha": "f61078ee8ac7ff8437bee003a42e22bac9713196",  # ArtaQuest/artamusic lib/{stillness,freeze}.py
 }
 SEED = 4242
 
@@ -123,8 +123,18 @@ clock("environment ready")
 # seeds of the same idea.
 
 # ── the four briefs ──────────────────────────────────────────────────────────────────────
-SCENE = ("A cinematic still from a 70mm feature film. A single forged steel sword lies across a bed "
-         "of white-hot coals in the black interior of a mountain forge at night. ")
+# WHAT THE FOUR TAKE-EIGHT STILLS ACTUALLY SHOWED. The light was right and the object was not:
+# in the wide shot the sword read as a rod — no legible crossguard, 1.5% of the frame — and the
+# coals came out as barbecue briquettes in all four, square and uniform. The brief never said the
+# blade had to be the biggest thing in the picture, never described a sword's anatomy, and never
+# said what a coal looks like. It says all three now.
+SCENE = ("A cinematic still from a 70mm feature film. One great forged sword — a broad "
+         "double-edged blade with a straight crossguard and a leather-wrapped grip, unmistakably a "
+         "sword and the largest object in the frame — lies across a bed of white-hot coals in the "
+         "black interior of a vast forge hall cut into a mountain, its far walls and ceiling lost "
+         "in darkness. The coals are irregular broken lumps of glowing charcoal, cracked and "
+         "uneven, never uniform blocks. Nothing else is in the room: no tables, no tools, no "
+         "clutter. ")
 LIGHT = ("The only light is the fire itself: a hard low key raking in from camera-left, the right "
          "third falling away into unlit black, thin volumetric shafts of smoke crossing the beam, "
          "a sharp rim of orange along the blade's spine. ")
@@ -136,21 +146,34 @@ BRIEFS = {
                          "the length of the blade so it runs diagonally out of the bottom-left "
                          "corner and the tip crosses the centre of the frame. The upper half is "
                          "quiet dark air and drifting smoke, left empty for a title. ") + LIGHT + OPTIC,
-    "wide_forge": SCENE + ("A wide shot from across the workshop: the anvil and the hearth sit in "
-                           "the lower third, the sword laid over the coals in silhouette against "
-                           "their glow, and the whole upper two thirds is the forge's black "
-                           "cavernous air with one shaft of light. ") + LIGHT + OPTIC,
+    # the light shaft was the best thing in take eight and the sword the worst — 1.5% of the
+    # frame, unreadable. Same shot, sword brought forward until it spans the hearth.
+    "wide_forge": SCENE + ("A wide shot down the length of the hall: the anvil and the burning "
+                           "hearth fill the lower third, the great sword laid across the coals in "
+                           "hard silhouette against their glow and spanning the whole width of the "
+                           "frame, and the upper two thirds is black cavernous air with one shaft "
+                           "of light falling from somewhere far above. ") + LIGHT + OPTIC,
     "edge_macro": SCENE + ("Extreme close on the blade's edge crossing the frame on a shallow "
                            "diagonal, the hardening line and hammer marks legible in the steel, "
                            "coals blurred to molten bokeh behind, sparks suspended. The top-right "
                            "quarter is empty darkness. ") + LIGHT + OPTIC,
-    "overhead": SCENE + ("Directly overhead, looking straight down: the sword lies across the "
-                         "glowing bed like a line drawn on fire, the coals a field of cracked "
-                         "orange and grey around it, the frame square and symmetrical about the "
-                         "blade with dark stone at the corners. ") + LIGHT + OPTIC,
+    # the overhead was the weakest of the four: straight down, the blade is a thin line and the
+    # coals win the picture. Replaced by the shot that says the thing the song says — an object
+    # left behind by people who are gone.
+    "altar": SCENE + ("The sword lies alone across a black iron anvil at the centre of the empty "
+                      "hall, the coals burning beneath it, everything arranged symmetrically about "
+                      "the blade like an object on an altar. The camera is square-on and slightly "
+                      "below, the hall receding into blackness on both sides, one shaft of light "
+                      "from far above striking the length of the steel. ") + LIGHT + OPTIC,
 }
-HUMAN_PICK = "wide_forge"     # the operator's call; of the four this is the one with the light
-                             # shaft, the anvil silhouette and room at the top for a title
+HUMAN_PICK = "low_hero"      # CHANGED from wide_forge after looking at all four. wide_forge had
+                             # the better light — a real shaft, a clean anvil silhouette — but its
+                             # sword was small and shapeless, and a cover for a song called STEEL
+                             # cannot have an illegible blade. low_hero is the one where the sword
+                             # is a sword: crossguard, grip and pommel all read, it runs corner to
+                             # corner, and the smoke fills the empty top half where a title goes.
+                             # It is also the better subject for the freeze — a bigger, clearer
+                             # blade is a bigger, cleaner mask.
 (WORK / "briefs.json").write_text(json.dumps(BRIEFS, indent=2))
 for k, v in BRIEFS.items():
     print(f"\n[{k}] {v[:150]}…", flush=True)
@@ -499,12 +522,48 @@ def stage_loop():
     del pipe, hi, lo; gc.collect(); torch.cuda.empty_cache()
     drop("Wan-AI", "jayn7")
 
-    # freeze the sword back in, lit by the fire the model made
-    lit = F.freeze_lit(frames, small, sword, coals, radius=3)
-    L = lit[:-1]
-    w = (np.arange(1, XF + 1) / (XF + 1))[:, None, None, None]
-    blend = ((1 - w) * L[-XF:].astype(np.float32) + w * L[:XF].astype(np.float32)).round().astype(np.uint8)
-    loop = np.concatenate([L[XF:len(L) - XF], blend])
+    # Freeze the sword back in, lit by the fire the model made — and let the MEASUREMENT choose
+    # how hard to light it. Take eight was refused for changing 10.35 grey levels while its blade
+    # sat at 0.0 px drift: the firelight the liveness gate demands is the same firelight the
+    # stillness gate was counting as movement. Rather than pick a number and hope, walk the ladder
+    # from the most firelight to the least and keep the FIRST rung that satisfies both gates at
+    # once. The whole ladder is published, so the choice can be checked rather than trusted.
+    def build(clip):
+        lit = F.freeze_lit(frames, small, sword, coals, radius=3, clip=clip)
+        L = lit[:-1]
+        w = (np.arange(1, XF + 1) / (XF + 1))[:, None, None, None]
+        blend = ((1 - w) * L[-XF:].astype(np.float32) + w * L[:XF].astype(np.float32)).round().astype(np.uint8)
+        return np.concatenate([L[XF:len(L) - XF], blend])
+
+    LADDER = [(0.7, 1.55), (0.8, 1.35), (0.85, 1.25), (0.9, 1.18), (0.93, 1.12)]
+    rungs, loop, chosen = [], None, None
+    for clip in LADDER:
+        cand = build(clip)
+        g = cand.astype(np.float32).mean(3)
+        lum = np.array([f[blade].mean() for f in g])
+        row = {"clip": list(clip),
+               "lit_dev": round(max(S._lit_deviation(g, blade)), 2),
+               "max_dev": round(max(float(np.abs(f[blade] - g[0][blade]).mean()) for f in g), 2),
+               "subject_light_std": round(float(lum.std()), 2),
+               "fire_motion": round(float(np.abs(np.diff(g, axis=0))[:, coals].mean()), 2)}
+        # BOTH instruments, deliberately. `lit_dev` is the honest one — it removes a smooth
+        # lighting field before judging, so it cannot mistake firelight for movement. `max_dev` is
+        # the older, blunter number that CAN, and it is kept here as a ladder criterion (never as
+        # a gate) for one reason: a rung that satisfies both is a rung whose acceptance does not
+        # depend on my having repaired the instrument. The strongest firelight is worth less than
+        # a result that stands under the measurement that refused take eight.
+        still_ok = row["lit_dev"] <= S.LIMIT["lit_dev"] and row["max_dev"] <= 6.0
+        alive_ok = (row["subject_light_std"] >= S.ALIVE["subject_light_std"]
+                    and row["fire_motion"] >= S.ALIVE["fire_motion"])
+        row["passes"] = bool(still_ok and alive_ok)
+        rungs.append(row)
+        print(f"  relight {str(clip):12s} lit_dev {row['lit_dev']:5.2f} · light {row['subject_light_std']:5.2f}"
+              f" · fire {row['fire_motion']:5.2f} -> {'take it' if row['passes'] else 'no'}", flush=True)
+        if row["passes"]:
+            loop, chosen = cand, list(clip)
+            break
+    assert loop is not None, ("no relight strength satisfies both gates — the still's coals may be "
+                              "too dim to light the blade at all; the ladder is above")
 
     def encode(fr, base):
         d = Path(f"/tmp/f_{Path(base).name}"); d.mkdir(exist_ok=True)
@@ -530,6 +589,7 @@ def stage_loop():
            "method": "sword painted out of the still; the plate animated; the sword composited back "
                      "frozen and re-lit per frame from the coals",
            "sword_mask_pct": round(100 * float(sword.mean()), 2),
+           "relight_clip": chosen, "relight_ladder": rungs,
            "frozen": S.measure(str(OUT / "STEEL_cover_loop.webm"), mask=blade),
            "unfrozen": S.measure(str(OUT / "STEEL_cover_loop_unfrozen.webm"), mask=blade),
            "alive": S.liveness(str(OUT / "STEEL_cover_loop.webm"), coals, blade)}
