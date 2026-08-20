@@ -154,15 +154,39 @@ def run(steps):
                     generator=torch.Generator("cuda:0").manual_seed(SEED), output_type="latent")
 
 
-def decode(lat):
-    """Bring the VAE back to a card only now, when the transformer's activations are gone."""
+def decode(lat, chunk=16):
+    """Decode after the transformer is GONE, and in temporal chunks.
+
+    The generation itself succeeded and then the decode died asking for 1.91 GiB with 1.52 free —
+    because 7.6 GB of transformer was still sitting on the card doing nothing. It is not needed
+    once the latents exist, and a model kept alive out of habit is the most expensive kind of
+    habit. Freeing it turns 6.8 GB free into most of a card.
+
+    Chunking is the belt to that brace: 61 frames of 480x480 is one very large allocation however
+    much is free, so the latents are decoded a slice at a time and joined. The slices overlap by
+    nothing — this VAE's temporal compression means a clean cut on a chunk boundary, and the
+    seam that would matter is between LATENT frames, not pixel ones.
+    """
+    global tr
+    pipe.transformer = None
+    try:
+        del tr
+    except NameError:
+        pass
     gc.collect(); torch.cuda.empty_cache()
     free0 = torch.cuda.mem_get_info(0)[0] / 2**30
     dev = "cuda:0" if free0 > 4.0 else "cuda:1"
-    print(f"  decoding on {dev} ({free0:.1f}G free on cuda:0)", flush=True)
+    print(f"  transformer freed · decoding on {dev} ({free0:.1f}G free)", flush=True)
     pipe.vae.to(dev)
+    n = lat.shape[2]
+    outs = []
     with torch.inference_mode():
-        out = pipe.vae.decode(lat.to(dev, pipe.vae.dtype), return_dict=False)[0]
+        for i in range(0, n, chunk):
+            piece = lat[:, :, i:i + chunk].to(dev, pipe.vae.dtype)
+            outs.append(pipe.vae.decode(piece, return_dict=False)[0].float().cpu())
+            del piece; gc.collect(); torch.cuda.empty_cache()
+            print(f"    decoded latent frames {i}..{min(i+chunk, n)} of {n}", flush=True)
+    out = torch.cat(outs, dim=2)
     return pipe.video_processor.postprocess_video(out, output_type="np")[0]
 
 # attention slicing if this transformer offers it — it trades a little speed for a much smaller
