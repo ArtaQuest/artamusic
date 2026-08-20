@@ -139,7 +139,14 @@ print(f"  transformer on cuda:0 · vae on {DEC} · "
 # Kaggle session, and the honest way to learn that is to measure two steps and multiply.
 
 # %%
-H = W = 896
+# A RESOLUTION LADDER, BECAUSE IT MISSED BY 150 MB. With the transformer resident the card has
+# ~3 GB left, and an 896x896 denoise asked for 2.20 GiB with 2.06 GiB free. That is close enough
+# that guessing a smaller number and pushing again would be a coin toss burning a session slot per
+# flip, so the run finds its own ceiling: try the largest, drop a rung on OOM, and record which one
+# it landed on. (Resident is still the right call over offload — offload is what made base cost 56
+# seconds a step in the first place.)
+LADDER_PX = [896, 832, 768, 704]
+H = W = LADDER_PX[0]
 def render(name, steps):
     pe, ne = embeds[name]
     pe = [t.to("cuda:0", torch.bfloat16) for t in pe]
@@ -154,7 +161,19 @@ def render(name, steps):
                             return_dict=False)[0]
     return pipe.image_processor.postprocess(x, output_type="pil")[0]
 
-t0 = time.time(); render("wide_forge", 2); per_step = (time.time() - t0) / 2
+per_step = None
+for px in LADDER_PX:
+    H = W = px
+    try:
+        t0 = time.time(); render("wide_forge", 2); per_step = (time.time() - t0) / 2
+        print(f"  {px}x{px} fits · {per_step:.1f} s/step", flush=True)
+        break
+    except torch.cuda.OutOfMemoryError:
+        print(f"  {px}x{px} OOM", flush=True)
+        gc.collect(); torch.cuda.empty_cache()
+assert per_step is not None, (
+    "Z-Image base does not fit a T4 at any of " + str(LADDER_PX) + " with the transformer "
+    "resident. Turbo stays. This is the answer, not a bug.")
 print(f"\n  {per_step:.1f} s/step  ->  40 steps = {per_step*40/60:.1f} min/still, "
       f"four stills = {per_step*40*4/60:.1f} min", flush=True)
 BUDGET_MIN = 150
@@ -166,7 +185,7 @@ assert per_step * STEPS * 4 / 60 < BUDGET_MIN, (
 
 # %%
 rec = {"model": f"Z-Image base ({REPO})", "revision": REV, "steps": STEPS, "guidance": 5.0,
-       "encoded": how_encoded,
+       "encoded": how_encoded, "resolution": H,
        "seconds_per_step": round(per_step, 2), "candidates": {}}
 for name in BRIEFS:
     t0 = time.time(); im = render(name, STEPS)
