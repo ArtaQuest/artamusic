@@ -61,7 +61,15 @@ def clock(tag):
     print(f"  ⏱ {tag} · t+{(time.time()-T0)/60:.1f} min", flush=True)
 
 # %%
-subprocess.run([sys.executable, "-m", "pip", "install", "-q", "diffusers==0.39.0",
+# DIFFUSERS FROM MAIN, AT A COMMIT. Cosmos3OmniPipeline exists in the pinned 0.39.0 release, which
+# is what made this look ready — but it is an EARLIER version of the class. Run against it, the
+# transformer ignored the config attributes this checkpoint actually needs
+# (backbone_type=cosmos3_edge_nemotron_dense, hidden_act=relu2, rope_axes_dim), built a different
+# architecture from the weights, and left parameters on the meta device; the failure surfaced as
+# "Cannot copy out of meta tensor" on .to(), which says nothing about the real cause. main knows
+# nemotron and relu2; 0.39.0 knows neither word. Pinned to a commit so this stays re-runnable.
+DIFFUSERS = "git+https://github.com/huggingface/diffusers@2f7e0154a9db246e95c9ede43edba7db5b130805"
+subprocess.run([sys.executable, "-m", "pip", "install", "-q", DIFFUSERS,
                 "transformers>=5.13", "accelerate", "safetensors", "sentencepiece", "protobuf",
                 "ftfy", "imageio", "imageio-ffmpeg"], check=True)
 import numpy as np, torch
