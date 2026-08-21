@@ -66,14 +66,45 @@ def best_cycle(frames, min_frames=24, size=64):
     return best
 
 
-def cycle_report(frames, min_frames=24):
-    i, j, score = best_cycle(frames, min_frames)
+def all_cycles(frames, min_frames=24, size=64):
+    """Every start's best partner, so a caller can trade length against seam quality."""
+    v = _small(frames, size)
+    v = v - v.mean(1, keepdims=True)
+    v /= np.maximum(np.sqrt((v * v).mean(1, keepdims=True)), 1e-6)
+    n = len(v)
+    out = []
+    for i in range(0, max(0, n - min_frames - 1)):
+        j = np.arange(i + min_frames, n - 1)
+        if not len(j):
+            continue
+        d = np.abs(v[j] - v[i]).mean(1) + np.abs(v[j + 1] - v[i + 1]).mean(1)
+        k = int(d.argmin())
+        out.append((i, int(j[k]), float(d[k])))
+    return out
+
+
+def cycle_report(frames, min_frames=24, prefer_longest=True):
+    """Pick the LONGEST invisible cut, not the single best-scoring one.
+
+    Taking the best score alone biases short: a hammer's rise-and-fall repeats, so the tightest
+    match is usually one strike, and one strike at 24 fps is well under two seconds — which reads
+    as a stutter rather than a loop. Any cut whose seam is less visible than an ordinary
+    frame-to-frame step is already invisible, and among those the longest is simply better. So take
+    the longest that clears that bar, and fall back to the best-scoring one when nothing does.
+    """
+    cands = all_cycles(frames, min_frames)
     v = _small(frames)
     v = v - v.mean(1, keepdims=True)
     v /= np.maximum(np.sqrt((v * v).mean(1, keepdims=True)), 1e-6)
-    naive = float(np.abs(v[-1] - v[0]).mean() + np.abs(v[0] - v[1]).mean())
     typical = float(np.abs(np.diff(v, axis=0)).mean() * 2)
+    i, j, score = min(cands, key=lambda c: c[2]) if cands else (0, len(frames), float("inf"))
+    if prefer_longest and cands:
+        clean = [c for c in cands if c[2] < typical]
+        if clean:
+            i, j, score = max(clean, key=lambda c: c[1] - c[0])
+    naive = float(np.abs(v[-1] - v[0]).mean() + np.abs(v[0] - v[1]).mean())
     return {"start": int(i), "end": int(j), "frames": int(j - i),
+            "candidates_clean": int(sum(1 for c in cands if c[2] < typical)),
             "seam_score": round(score, 4),
             "whole_clip_seam": round(naive, 4),
             "typical_step": round(typical, 4),
