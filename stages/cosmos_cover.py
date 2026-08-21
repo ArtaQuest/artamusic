@@ -162,7 +162,17 @@ for (px, nf) in [(H, NF)] + [s for s in SHAPES if s != (H, NF)]:
     try:
         t0 = time.time(); out = run(STEPS, px, px, nf); gen_s = time.time() - t0
         H = W = px; NF = nf
-        frames = (np.clip(out.frames[0], 0, 1) * 255).round().astype(np.uint8)
+        # Cosmos3OmniPipelineOutput carries `.video`, not `.frames`, and for output_type="np" it
+        # is already [T, H, W, C] rather than a batch — so neither the attribute name nor the [0]
+        # carried over from the Wan pipelines this notebook was built from. Read it from the
+        # dataclass rather than assuming the shape.
+        vid = getattr(out, "video", None)
+        if vid is None:
+            vid = out.frames
+        vid = np.asarray(vid)
+        if vid.ndim == 5:            # [B, T, H, W, C]
+            vid = vid[0]
+        frames = (np.clip(vid, 0, 1) * 255).round().astype(np.uint8)
         print(f"  rendered {len(frames)} frames at {px}x{px} in {gen_s/60:.1f} min", flush=True)
         break
     except torch.cuda.OutOfMemoryError:
