@@ -403,9 +403,6 @@ print(f"[stage {sys.argv[1]}] torch {torch.__version__} \u00b7 {NGPU} gpu(s)", f
 
 
 
-if __name__ == "__main__":
-    {"cover": stage_cover}[sys.argv[1]]()
-    print(f"[stage {sys.argv[1]}] done", flush=True)
 
 
 def stage_cover():
@@ -692,6 +689,11 @@ def stage_cover():
         print("\nA loop was generated and written. It was NOT judged — the blade mask was not "
               "recognised — so nothing here claims the sword holds still.", flush=True)
     clock("DONE")
+
+
+if __name__ == "__main__":
+    {"cover": stage_cover}[sys.argv[1]]()
+    print(f"[stage {sys.argv[1]}] done", flush=True)
 """
 
 Path("/tmp/aq_stage.py").write_text(STAGE_SRC)

@@ -113,3 +113,73 @@ def unbound_in_functions(path_or_src, is_src=False):
     for fn in [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
         _scope_check(fn, gl, problems, fn.name)
     return sorted(set(problems))
+
+def used_before_defined(path_or_src, is_src=False):
+    """Module-scope names USED above the line that binds them.
+
+    `unbound()` asks whether a name is bound anywhere in the module, which is not the question
+    Python answers at run time. A stage source whose `if __name__ == "__main__":` dispatcher sat
+    ABOVE the function it dispatches to passed every check here and then died on the GPU with
+    `NameError: name 'stage_cover' is not defined` — the name was bound, just not yet. Same shape
+    as reading a model's device map after deleting the model: static binding is not ordering.
+
+    Two things it must NOT flag, both learned by flagging them:
+      * a name referenced inside a function body, which does not run where it is written;
+      * a name bound inside a `for`/`if`/`while`/`try` at module scope — those bindings are real,
+        and missing them made this report seventeen false positives on its first outing. A check
+        that cries wolf is worse than no check, because it gets skipped.
+    """
+    import ast as _a
+    from pathlib import Path as _P
+    src = path_or_src if is_src else _P(path_or_src).read_text()
+    tree = _a.parse(src)
+    SCOPED = (_a.FunctionDef, _a.AsyncFunctionDef, _a.ClassDef, _a.Lambda)
+
+    def walk_module(node):
+        """Every node that EXECUTES at module scope — descending into compound statements but
+        never into a function or class body."""
+        for child in _a.iter_child_nodes(node):
+            if isinstance(child, SCOPED):
+                yield child                      # the def itself binds a name; its body does not run
+                continue
+            yield child
+            yield from walk_module(child)
+
+    bound_at = {}
+    def note(name, line):
+        if name not in bound_at or line < bound_at[name]:
+            bound_at[name] = line
+
+    for n in walk_module(tree):
+        if isinstance(n, SCOPED) and hasattr(n, "name"):
+            note(n.name, n.lineno)
+        elif isinstance(n, (_a.Assign, _a.AugAssign, _a.AnnAssign, _a.For, _a.AsyncFor)):
+            tgts = n.targets if isinstance(n, _a.Assign) else [getattr(n, "target", None)]
+            for t in filter(None, tgts):
+                for x in _a.walk(t):
+                    if isinstance(x, _a.Name):
+                        note(x.id, n.lineno)
+        elif isinstance(n, (_a.Import, _a.ImportFrom)):
+            for al in n.names:
+                note((al.asname or al.name).split(".")[0], n.lineno)
+        elif isinstance(n, (_a.With, _a.AsyncWith)):
+            for item in n.items:
+                for x in _a.walk(item.optional_vars) if item.optional_vars else []:
+                    if isinstance(x, _a.Name):
+                        note(x.id, n.lineno)
+        elif isinstance(n, _a.ExceptHandler) and n.name:
+            note(n.name, n.lineno)
+        elif isinstance(n, (_a.comprehension,)):
+            for x in _a.walk(n.target):
+                if isinstance(x, _a.Name):
+                    note(x.id, getattr(n.target, "lineno", 0))
+
+    bad = []
+    for n in walk_module(tree):
+        if isinstance(n, SCOPED):
+            continue
+        if isinstance(n, _a.Name) and isinstance(n.ctx, _a.Load):
+            at = bound_at.get(n.id)
+            if at is not None and at > n.lineno:
+                bad.append(f"{n.id} used at line {n.lineno}, bound at {at}")
+    return sorted(set(bad))

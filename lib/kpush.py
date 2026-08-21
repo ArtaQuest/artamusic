@@ -172,15 +172,35 @@ def precheck_source(py):
     _badf = unbound_in_functions(_src)
     if _badf:
         raise RuntimeError(f"{py}: unbound names inside functions {_badf} — refusing to push")
+    # AND ORDERING, WHICH BINDING DOES NOT COVER. A stage whose __main__ dispatcher sat above the
+    # function it dispatches to passed every check here and died on the GPU with NameError. The
+    # name was bound; it was just not bound YET.
+    from precheck import used_before_defined
+    _bado = used_before_defined(_src)
+    if _bado:
+        raise RuntimeError(f"{py}: used before defined at module scope {_bado} — refusing to push")
     # And any python source this file EMBEDS to run elsewhere (STAGE_SRC = r"""…""") is code too.
     import ast as _ast, re as _re
-    for _m in _re.finditer(r'^([A-Z_]+)\s*=\s*r?"""', Path(_src).read_text(), _re.M):
-        _g = {}
-        try:
-            exec(compile(_ast.parse(Path(_src).read_text()), "<embed>", "exec"), {"__name__": "_x"}, _g)
-        except Exception:
-            break
-        _emb = _g.get(_m.group(1))
+    # READ THE EMBEDDED SOURCE FROM THE AST, NEVER BY EXECUTING THE FILE. This used to exec the
+    # whole notebook to get at STAGE_SRC — which for any real notebook raises immediately (no
+    # /kaggle, no torch, no GPU), hit the bare `except: break`, and skipped every embedded check in
+    # silence. The checks looked present and protected nothing: a stage whose __main__ dispatcher
+    # sat above its own definitions sailed through and died on the GPU. A string literal assigned
+    # at module scope can simply be read out of the tree.
+    _tree = _ast.parse(Path(_src).read_text())
+    _embeds = {}
+    for _n in _tree.body:
+        if isinstance(_n, _ast.Assign) and isinstance(_n.value, _ast.Constant) \
+                and isinstance(_n.value.value, str):
+            for _t in _n.targets:
+                if isinstance(_t, _ast.Name):
+                    _embeds[_t.id] = _n.value.value
+    for _name, _emb in _embeds.items():
+        class _M:
+            @staticmethod
+            def group(_i):
+                return _name
+        _m = _M
         if isinstance(_emb, str) and "import" in _emb and "def " in _emb:
             try:
                 _ast.parse(_emb)
@@ -194,11 +214,14 @@ def precheck_source(py):
             # scope no longer existed, and that reference sat on the LAST line of a three-hour run.
             import tempfile as _tf2
             _t2 = Path(_tf2.mkdtemp()) / "embed.py"; _t2.write_text(_emb)
+            _beo = used_before_defined(_emb, is_src=True)
+            if _beo:
+                raise RuntimeError(f"{py}: embedded {_m.group(1)} used before defined {_beo} "
+                                   f"— refusing to push")
             _bem = unbound(str(_t2))
             if _bem:
                 raise RuntimeError(f"{py}: embedded {_m.group(1)} unbound at module scope {_bem} "
                                    f"— refusing to push")
-        break
 
 
     # A HUGGING FACE REVISION PIN THAT DOES NOT EXIST. Twice in one day a 40-character sha was
