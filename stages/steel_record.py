@@ -47,7 +47,7 @@ PINS = {
     "lyric_profile_sha": "ebee5bf324d8a6cff22ba666825a777c7dfc5c39",  # ArtaQuest/artamusic lib/lyric_profile.py
     "lyric_sha": "88348bd9e0d21d196cb95c54c20b2943a629c68a",
     "shot_sha": "fa6f8dc3823879dcf42b2d712358520006a3b887",   # ArtaQuest/artamusic song/shot_steel.json
-    "tools_sha": "bdb2f6e11db050b28d11d6dbcc996f131de252f3",   # ArtaQuest/artamusic lib/{stillness,freeze}.py          # ArtaQuest/artamusic song/lyrics_steel.txt + lib/clarity.py
+    "tools_sha": "25d6c9f7496fb882f28d205b0870c48ec4d7e040",   # ArtaQuest/artamusic lib/{stillness,freeze}.py          # ArtaQuest/artamusic song/lyrics_steel.txt + lib/clarity.py
     "asr": "large-v3",
     # NO IMAGE MODEL, and no image conditioning. The cover used to be a still made by a
     # text-to-image model and then animated; three rounds of that came back "not realistic",
@@ -323,13 +323,14 @@ print(f"[shot] {SHOT['name']} · hold_subject={HOLD_SUBJECT}\n[prompt] {PROMPT}"
 
 # ── the measuring instruments, at a pinned commit, proven before anything expensive runs ──
 TOOLS = TMP / "tools"; TOOLS.mkdir(exist_ok=True)
-for _f in ("stillness.py", "freeze.py"):
+for _f in ("stillness.py", "freeze.py", "looper.py"):
     urllib.request.urlretrieve(
         f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['tools_sha']}/lib/{_f}",
         str(TOOLS / _f))
 sys.path.insert(0, str(TOOLS))
-import stillness as _S
+import stillness as _S, looper as _L
 assert _S.selftest(), "the stillness instrument fails its own selftest — no number here is trustworthy"
+assert _L.selftest(), "the cycle finder fails its own selftest — no cut it proposes is trustworthy"
 
 # ── the cover stages, each in its OWN PROCESS ────────────────────────────────────────────
 # Four runs died here and the mechanism was the same every time: this notebook's process keeps the
@@ -411,6 +412,7 @@ def stage_cover():
     # The whole cover, generated as VIDEO from text — ported from stages/t2v_cover.py,
     # the standalone notebook it was proven in. No still image, no image conditioning.
     PROMPT = CFG["prompt"]; NEG = CFG["negative"]; HOLD_SUBJECT = CFG["hold_subject"]; CYCLE = {}
+    import looper as L
     import stillness as S, freeze as F
     from diffusers import WanPipeline, WanTransformer3DModel, AutoencoderKLWan, GGUFQuantizationConfig
     from transformers import UMT5EncoderModel, AutoTokenizer
@@ -544,11 +546,30 @@ def stage_cover():
         sh(f"ffmpeg -v error -i '{base}_raw.mp4' -vf scale=1080:1080:flags=lanczos -c:v libvpx-vp9 "
            f"-crf 33 -b:v 0 -row-mt 1 -cpu-used 1 -pix_fmt yuv420p -an '{base}_1080.webm' -y", quiet=True)
 
+    def dissolve(fr, xf):
+        if xf <= 0 or len(fr) < 2 * xf + 2:
+            return fr
+        w = (np.arange(1, xf + 1) / (xf + 1))[:, None, None, None]
+        blend = ((1 - w) * fr[-xf:].astype(np.float32) + w * fr[:xf].astype(np.float32)).round().astype(np.uint8)
+        return np.concatenate([fr[xf:len(fr) - xf], blend])
+
     def close_loop(fr):
-        L = fr[:-1]
-        w = (np.arange(1, XF + 1) / (XF + 1))[:, None, None, None]
-        blend = ((1 - w) * L[-XF:].astype(np.float32) + w * L[:XF].astype(np.float32)).round().astype(np.uint8)
-        return np.concatenate([L[XF:len(L) - XF], blend])
+        # THE LOOP IS CLOSED ON A REAL CYCLE, not a cross-fade. A hammer at the top of its swing
+        # dissolved into one at the bottom is a morph and reads as one. The clip is searched for
+        # the pair of frames that genuinely match in position AND velocity — the whole clip
+        # included, which is the option that needs no justification and was once missing — and the
+        # cut is taken only when it is less visible than an ordinary frame-to-frame step.
+        nonlocal CYCLE
+        CYCLE = L.cycle_report(fr, min_frames=max(24, len(fr) // 3))
+        print(f"  cycle {CYCLE['start']}..{CYCLE['end']} ({CYCLE['frames']} frames) · seam "
+              f"{CYCLE['seam_vs_typical']}x a normal step · whole clip "
+              f"{CYCLE['whole_vs_typical']}x · whole chosen={CYCLE['whole_clip_chosen']}", flush=True)
+        if CYCLE["seam_vs_typical"] < 1.0:
+            CYCLE["used"] = "cycle"
+            return dissolve(fr[CYCLE["start"]:CYCLE["end"] + 1],
+                            8 if CYCLE["whole_clip_chosen"] else 3)
+        CYCLE["used"] = "dissolve"
+        return dissolve(fr[:-1], XF)
 
     still = frames[0]
     raw_loop = close_loop(frames)
@@ -643,6 +664,7 @@ def stage_cover():
                       + ("; the sword composited back frozen and re-lit because it drifted"
                          if needs_freeze else "; the sword held still on its own and was left alone")),
            "froze_the_blade": needs_freeze, "relight_ladder": ladder,
+           "cycle": CYCLE,
            "as_generated": raw_m, "as_generated_alive": raw_a,
            "frozen": fin_m, "alive": fin_a}
     rec["mask_ok"] = mask_ok
