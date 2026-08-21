@@ -142,6 +142,7 @@ mem("transformer sharded, vae on host")
 # fine at 480x480x61 and the full run then peaked ~1.9 GB over — so the run finds its own ceiling
 # instead of me guessing it, and records which rung it landed on.
 SHAPES = [(480, 61), (480, 45), (448, 45), (384, 45)]
+DEVICE_MAP = {}
 H = W = 480
 NF = 61
 def run(steps):
@@ -167,7 +168,14 @@ def decode(lat, chunk=16):
     nothing — this VAE's temporal compression means a clean cut on a chunk boundary, and the
     seam that would matter is between LATENT frames, not pixel ones.
     """
-    global tr
+    # Keep the device map BEFORE dropping the model, because the manifest still wants it. Deleting
+    # `tr` here and then reading it forty minutes later cost a completed 61-frame render its JSON:
+    # the render, the decode and every image survived, and the run still ended in a NameError on a
+    # reporting line. A static scope check cannot see this one — `tr` IS bound at module level, and
+    # it is a runtime `del` that unbinds it — which is exactly why the value is copied out first
+    # rather than the name being reached for again.
+    global tr, DEVICE_MAP
+    DEVICE_MAP = {k: str(v) for k, v in (getattr(tr, "hf_device_map", {}) or {}).items()}
     pipe.transformer = None
     try:
         del tr
@@ -248,7 +256,7 @@ Image.fromarray(np.concatenate([arr[i] for i in idx], 1)).save(OUT / "sheet.jpg"
 (Path("/kaggle/working") / "hunyuan_probe.json").write_text(json.dumps(
     {"model": REPO, "revision": REV, "seconds_per_step": round(per_step, 1), "steps": STEPS,
      "res": [H, W], "frames": int(len(arr)), "gen_minutes": round(gen_s/60, 1),
-     "device_map": {k: str(v) for k, v in (getattr(tr, "hf_device_map", {}) or {}).items()},
+     "device_map": DEVICE_MAP,
      "prompt": PROMPT, "negative": NEG}, indent=2))
 print("\nHUNYUAN: done — look at sheet.jpg and frame0.png", flush=True)
 print(f"  total t+{(time.time()-T0)/60:.1f} min", flush=True)

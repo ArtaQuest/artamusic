@@ -51,8 +51,8 @@ PINS = {
     "wan_gguf": ("QuantStack/Wan2.2-T2V-A14B-GGUF", "73eafba53a1a8f29254e4c77f92e74ea27d7cd6f"),
     "wan_high": "HighNoise/Wan2.2-T2V-A14B-HighNoise-Q4_K_M.gguf",
     "wan_low": "LowNoise/Wan2.2-T2V-A14B-LowNoise-Q4_K_M.gguf",
-    "shot_sha": "9fed845f616bcfab1404e220bf13f0366690135b",   # ArtaQuest/artamusic song/shot_steel.json
-    "tools_sha": "e43b03d4ddc8810e67f467f52feef9ce65ce9131",
+    "shot_sha": "fa6f8dc3823879dcf42b2d712358520006a3b887",   # ArtaQuest/artamusic song/shot_steel.json
+    "tools_sha": "bdb2f6e11db050b28d11d6dbcc996f131de252f3",
 }
 
 def sh(c, quiet=False):
@@ -309,7 +309,11 @@ raw_loop = close_loop(frames)
 # That would be a two-and-a-half-hour generation lost to a crash in the part that was only supposed
 # to grade it. So the generated loop goes to disk first, and stays there whatever happens next.
 Image.fromarray(still).save(OUT / "frame0.png")
-encode(raw_loop, str(OUT / "STEEL_cover_loop_asgenerated"))
+# THE AS-GENERATED FILE MUST BE AS GENERATED. `close_loop` now searches for a cycle and CUTS the
+# clip, so passing its output here wrote a file labelled "asgenerated" that had already been cut —
+# and the real generation, the only thing a reader could check the cut against, was never written
+# at all. The last hammer run lost its 81 raw frames that way.
+encode(frames, str(OUT / "STEEL_cover_loop_asgenerated"))
 print("  raw generation written to disk", flush=True)
 
 blade = F.steel_mask(still)

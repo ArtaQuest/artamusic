@@ -47,7 +47,7 @@ SEED = 4242
 PINS = {
     "cosmos": ("nvidia/Cosmos3-Edge", "e56fbcd06a7823969a25047cf50d5051ae436e88"),
     "shot_sha": "fa6f8dc3823879dcf42b2d712358520006a3b887",
-    "tools_sha": "e43b03d4ddc8810e67f467f52feef9ce65ce9131",
+    "tools_sha": "bdb2f6e11db050b28d11d6dbcc996f131de252f3",
 }
 
 def sh(c, quiet=False):

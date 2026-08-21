@@ -46,8 +46,8 @@ PINS = {
     "measure_sha": "17b49399cfd6c24f4070353fc33643ae15e1331d",      # ArtaQuest/artamusic lib/measure.py
     "lyric_profile_sha": "ebee5bf324d8a6cff22ba666825a777c7dfc5c39",  # ArtaQuest/artamusic lib/lyric_profile.py
     "lyric_sha": "88348bd9e0d21d196cb95c54c20b2943a629c68a",
-    "shot_sha": "9fed845f616bcfab1404e220bf13f0366690135b",   # ArtaQuest/artamusic song/shot_steel.json
-    "tools_sha": "e43b03d4ddc8810e67f467f52feef9ce65ce9131",   # ArtaQuest/artamusic lib/{stillness,freeze}.py          # ArtaQuest/artamusic song/lyrics_steel.txt + lib/clarity.py
+    "shot_sha": "fa6f8dc3823879dcf42b2d712358520006a3b887",   # ArtaQuest/artamusic song/shot_steel.json
+    "tools_sha": "bdb2f6e11db050b28d11d6dbcc996f131de252f3",   # ArtaQuest/artamusic lib/{stillness,freeze}.py          # ArtaQuest/artamusic song/lyrics_steel.txt + lib/clarity.py
     "asr": "large-v3",
     # NO IMAGE MODEL, and no image conditioning. The cover used to be a still made by a
     # text-to-image model and then animated; three rounds of that came back "not realistic",
