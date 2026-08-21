@@ -397,6 +397,17 @@ from PIL import Image
 from huggingface_hub import hf_hub_download, snapshot_download
 np.random.seed(SEED); torch.manual_seed(SEED)
 NGPU = torch.cuda.device_count()
+# PREFER MAGMA FOR LINALG. A 47-minute cover generation died on
+# "cusolver error: CUSOLVER_STATUS_INTERNAL_ERROR, when calling cusolverDnCreate(handle)" — cuSOLVER
+# failing to allocate its own workspace handle, mid-run, on settings that had completed twice
+# standalone. That is memory pressure surfacing through a library that asks for its scratch late and
+# fails hard when it cannot get it. torch's own message suggests the alternative backend; MAGMA
+# allocates differently and does not need the handle. Cheap insurance on a run that costs hours.
+try:
+    torch.backends.cuda.preferred_linalg_library("magma")
+    print("  linalg backend: magma", flush=True)
+except Exception as _e:
+    print(f"  linalg backend unchanged ({str(_e)[:60]})", flush=True)
 print(f"[stage {sys.argv[1]}] torch {torch.__version__} \u00b7 {NGPU} gpu(s)", flush=True)
 
 
