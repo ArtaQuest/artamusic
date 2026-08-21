@@ -97,13 +97,27 @@ def cycle_report(frames, min_frames=24, prefer_longest=True):
     v = v - v.mean(1, keepdims=True)
     v /= np.maximum(np.sqrt((v * v).mean(1, keepdims=True)), 1e-6)
     typical = float(np.abs(np.diff(v, axis=0)).mean() * 2)
-    i, j, score = min(cands, key=lambda c: c[2]) if cands else (0, len(frames), float("inf"))
-    if prefer_longest and cands:
-        clean = [c for c in cands if c[2] < typical]
-        if clean:
-            i, j, score = max(clean, key=lambda c: c[1] - c[0])
     naive = float(np.abs(v[-1] - v[0]).mean() + np.abs(v[0] - v[1]).mean())
+    # THE WHOLE CLIP IS A CANDIDATE TOO. It was not, and that cost a loop: on the epic hammer take
+    # the search picked a 59-frame cycle seaming at 0.86x a normal step while the untouched 81
+    # frames seamed at 0.78x — both longer AND cleaner, and never once considered, because
+    # `all_cycles` can only propose cuts strictly inside the clip. Keeping the whole thing is the
+    # option that needs no justification, so it has to be on the list.
+    cands = cands + [(0, len(frames) - 1, naive)]
+    i, j, score = min(cands, key=lambda c: c[2])
+    # LONGEST, BUT NOT AT ANY PRICE. Preferring length alone lets a marginal seam beat an
+    # excellent one: on the period-12 fixture the whole 59-frame clip scores 0.91 — under the bar,
+    # so "clean" — while the true four-period cut scores 0.48, and taking the longer one puts a
+    # visible hitch in a rhythm that had none. So a longer candidate has to be within a quarter of
+    # the best seam available to displace it. On the epic hammer take the whole clip wins outright
+    # at 0.77 against 0.86 for the best interior cut, which is the case this is meant to allow.
+    if prefer_longest:
+        best = min(c[2] for c in cands)
+        clean = [c for c in cands if c[2] < typical and c[2] <= best * 1.25]
+        if clean:
+            i, j, score = max(clean, key=lambda c: (c[1] - c[0], -c[2]))
     return {"start": int(i), "end": int(j), "frames": int(j - i),
+            "whole_clip_chosen": bool(i == 0 and j == len(frames) - 1),
             "candidates_clean": int(sum(1 for c in cands if c[2] < typical)),
             "seam_score": round(score, 4),
             "whole_clip_seam": round(naive, 4),
