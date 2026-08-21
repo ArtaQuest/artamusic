@@ -598,7 +598,16 @@ def stage_cover():
     # A mask that is a sliver or half the picture is not a sword, and every number keyed on it would be
     # meaningless rather than wrong-looking. Say so and ship the generation unjudged rather than
     # inventing a verdict.
-    mask_ok = 0.15 <= mask_pct <= 12.0 and bool(coals.any())
+    # HOLD_SUBJECT GOVERNS THE STILLNESS GATES, and it did not. This line was ported before the
+    # hammering shot existed, so the stillness checks ran on a shot whose subject is MEANT to move
+    # and refused a perfectly good cover for changing 6.11 grey levels against a limit of 6.0 —
+    # after two hours and forty-two minutes of generating it. A cover cannot be graded on holding
+    # still when the whole instruction was to swing a hammer.
+    mask_ok = HOLD_SUBJECT and 0.15 <= mask_pct <= 12.0 and bool(coals.any())
+    if not HOLD_SUBJECT:
+        print("  HOLD_SUBJECT is off — this shot IS the hammering, so the subject is meant to "
+              "move. The freeze and the stillness gates are skipped by design, not by failure.",
+              flush=True)
     if not mask_ok:
         print(f"  the blade mask is implausible at {mask_pct:.2f}% — the freeze and the stillness "
               f"numbers are being SKIPPED, and the loop ships as generated", flush=True)
@@ -676,7 +685,8 @@ def stage_cover():
            "as_generated": raw_m, "as_generated_alive": raw_a,
            "frozen": fin_m, "alive": fin_a}
     rec["mask_ok"] = mask_ok
-    rec["verdict_still"] = S.verdict(fin_m) if mask_ok else ["mask not recognised — not judged"]
+    rec["verdict_still"] = (S.verdict(fin_m) if mask_ok else
+                            [] if not HOLD_SUBJECT else ["mask not recognised — not judged"])
     rec["verdict_alive"] = S.liveness_verdict(fin_a) if mask_ok else []
     (WORK / "loop_verify.json").write_text(json.dumps(rec, indent=2))
     print("\nLOOP:", json.dumps(rec), flush=True)
