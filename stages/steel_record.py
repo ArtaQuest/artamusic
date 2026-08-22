@@ -46,8 +46,10 @@ PINS = {
     "measure_sha": "17b49399cfd6c24f4070353fc33643ae15e1331d",      # ArtaQuest/artamusic lib/measure.py
     "lyric_profile_sha": "ebee5bf324d8a6cff22ba666825a777c7dfc5c39",  # ArtaQuest/artamusic lib/lyric_profile.py
     "lyric_sha": "88348bd9e0d21d196cb95c54c20b2943a629c68a",
-    "shot_sha": "fa6f8dc3823879dcf42b2d712358520006a3b887",   # ArtaQuest/artamusic song/shot_steel.json
-    "tools_sha": "25d6c9f7496fb882f28d205b0870c48ec4d7e040",   # ArtaQuest/artamusic lib/{stillness,freeze}.py          # ArtaQuest/artamusic song/lyrics_steel.txt + lib/clarity.py
+    "shot_sha": "f8ec81cddd037b729df93d48b7b0c83ab5d14f64",   # ArtaQuest/artamusic song/shot_lego.json
+    "lego_lora": ("Remade-AI/Lego", "3f7938015b2537238f9e4f17b8896ddceac9cbe7"),
+    "lora_file": "lego_35_epochs.safetensors",
+    "tools_sha": "f8ec81cddd037b729df93d48b7b0c83ab5d14f64",   # ArtaQuest/artamusic lib/{stillness,freeze}.py          # ArtaQuest/artamusic song/lyrics_steel.txt + lib/clarity.py
     "asr": "large-v3",
     # NO IMAGE MODEL, and no image conditioning. The cover used to be a still made by a
     # text-to-image model and then animated; three rounds of that came back "not realistic",
@@ -316,9 +318,9 @@ BPM, KEYSCALE = 100, "F minor"   # match the conditioning reference; a key fight
 # because it belongs to the shot: a sword lying still wants the freeze, a hammer swinging must not
 # have it, and keeping the flag away from the words describing the motion is how they disagree.
 urllib.request.urlretrieve(
-    f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['shot_sha']}/song/shot_steel.json",
-    "/tmp/shot_steel.json")
-SHOT = json.loads(Path("/tmp/shot_steel.json").read_text())
+    f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['shot_sha']}/song/shot_lego.json",
+    "/tmp/shot.json")
+SHOT = json.loads(Path("/tmp/shot.json").read_text())
 PROMPT, NEG, HOLD_SUBJECT = SHOT["prompt"], SHOT["negative"], SHOT["hold_subject"]
 assert "anvil" in PROMPT and "hammer" in PROMPT, "the fetched shot is not the hammering shot"
 print(f"[shot] {SHOT['name']} · hold_subject={HOLD_SUBJECT}\n[prompt] {PROMPT}", flush=True)
@@ -486,6 +488,35 @@ def stage_cover():
         print("  one expert per card", flush=True)
     else:
         pipe.enable_model_cpu_offload()
+
+    # THE LEGO ADAPTER, ON BOTH EXPERTS. Prompting the base model for bricks gets a LEGO SET with a
+    # real human face and real hands standing in it — the build is right and the minifigure is not.
+    # The Remade-AI adapter renders an actual minifigure: yellow head, printed face, the C-shaped
+    # hands. It is trained for Wan2.1-T2V-14B, and the reason it reaches Wan2.2-A14B is that the two
+    # transformers are the same shape — 40 layers, inner dim 5120, ffn 13824 — and the adapter's
+    # lora_A is [32, 5120] against both. Wan2.2 is a mixture of two experts and each denoises half
+    # the schedule, so an adapter on only `transformer` would leave the second half unstyled; the
+    # `load_into_transformer_2` path exists for exactly this.
+    #
+    # It is attempted, not assumed. `lora_applied` travels into the manifest either way, because a
+    # run that says which model made the frames is worth more than a run that dies proving a point.
+    LREPO, LREV = PINS["lego_lora"]
+    LORA = hf_hub_download(LREPO, PINS["lora_file"], revision=LREV)
+    LORA_APPLIED, LORA_ERROR = False, None
+    try:
+        pipe.load_lora_weights(LORA, adapter_name="lego")
+        if hasattr(pipe, "transformer_2") and pipe.transformer_2 is not None:
+            pipe.load_lora_weights(LORA, adapter_name="lego", load_into_transformer_2=True)
+        try:
+            pipe.set_adapters(["lego"], adapter_weights=[1.0])
+        except Exception:
+            pass
+        LORA_APPLIED = True
+        print("  LEGO LoRA APPLIED to both experts", flush=True)
+    except Exception as e:
+        LORA_ERROR = f"{type(e).__name__}: {e}"
+        print(f"  LEGO LoRA did NOT apply: {LORA_ERROR[:250]} — continuing on the base model, "
+              "which describes bricks from the prompt. Recorded as such.", flush=True)
     clock("experts loaded")
 
     # ## How many steps — measured, not chosen
@@ -665,6 +696,7 @@ def stage_cover():
 
     fin_m, fin_a = (measure_array(loop, blade) if mask_ok else ({}, {}))
     rec = {"model": f"Wan2.2-T2V-A14B Q4_K_M ({GREPO})", "hashes": HASHES, "seed": SEED,
+           "lora": f"{LREPO}@{LREV[:7]}", "lora_applied": LORA_APPLIED, "lora_error": LORA_ERROR,
            "steps": STEPS, "seconds_per_step": round(per_step, 1), "guidance": [4.0, 3.0],
            "res": [H, W], "frames": int(len(loop)), "fps": FPS, "gen_seconds": round(gen_s, 1),
            "method": ("text-to-video, no still image and no image conditioning; loop closed as "
