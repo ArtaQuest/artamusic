@@ -1203,8 +1203,24 @@ if rep.get("seconds") and abs(rep["seconds"] - DURATION) > 5:
 # the finished record refuses to assemble around a cover that failed.
 problems += [f"the cover loop: {x}" for x in loop_rec["verdict_still"]]
 problems += [f"the cover loop: {x}" for x in loop_rec["verdict_alive"]]
-if loop_rec["frozen"]["ratio"] >= 1.0:
-    problems.append(f"the blade moves more than the frame around it ({loop_rec['frozen']['ratio']}x)")
+# AND IT MUST ABSTAIN WHEN IT CANNOT SEE. This line used to read `loop_rec["frozen"]["ratio"]`
+# unconditionally, and `frozen` is `{}` whenever the subject was not mask-judged — which is every
+# shot that does not hold a subject still, so every LEGO shot. It cost a record: the run generated
+# the song, the cover and the loop, wrote all of them to disk, and then died with KeyError: 'ratio'
+# in the cell whose only job was to grade what had already succeeded. A verification step that
+# crashes on a run it has nothing to say about destroys the thing it was meant to certify.
+#
+# `ratio` is also the wrong number now. It was demoted to reported when the stillness instrument
+# was repaired — 46% of it was the blade being RE-LIT rather than moving — and `lit_dev` replaced
+# it as the gate. The verdicts above already carry the repaired instrument, so gating on `ratio`
+# here contradicted them as well as crashing.
+_fro = loop_rec.get("frozen") or {}
+if not loop_rec.get("mask_ok"):
+    verify["cover_unjudged"] = ("the subject mask was not recognised, so the cover's stillness was "
+                                "not judged — the loop is shipped and said to be unjudged, not "
+                                "silently passed")
+elif "lit_dev" in _fro and _fro["lit_dev"] > 6.0:
+    problems.append(f"the blade changes in a way no lighting field explains ({_fro['lit_dev']})")
 verify["problems"] = problems
 verify["disclosure"] = (f"male lead: median {reg.get('f0_hz')} Hz, lead mode {reg.get('lead_hz')} Hz "
                         f"carrying {reg.get('lead_frac')} of voiced frames, spread {reg.get('spread_st')} st, "
@@ -1221,8 +1237,15 @@ for f in sorted(OUT.iterdir()):
 print("\nDISCLOSURE:", verify["disclosure"], flush=True)
 print("\nMANIFEST:", json.dumps({k: v["bytes"] for k, v in manifest.items()}, indent=1), flush=True)
 assert not problems, "VERIFY REFUSED THE RECORD: " + "; ".join(problems)
+# The success line must survive a cover it could not judge, for the same reason the gate above must:
+# these dicts are empty whenever the subject mask was not recognised, and a summary that crashes
+# after everything passed is the worst possible place to learn that.
+_fro2, _alv = loop_rec.get("frozen") or {}, loop_rec.get("alive") or {}
+_cover_line = (f"blade drift {_fro2['drift_px']} px · fire {_alv['fire_motion']}"
+               if "drift_px" in _fro2 and "fire_motion" in _alv else
+               f"unjudged ({loop_rec.get('cycle', {}).get('used', '?')}, wrap "
+               f"{loop_rec.get('cycle', {}).get('wrap_vs_typical', '?')}x)")
 print(f"\nVERIFIED: male [{reg.get('register')}] · words {acc*100:.1f}% ({_WH[1]}) · "
       f"{Lm.get('lufs')} LUFS · LRA {Lm.get('lra_lu')} · TP {tp} dBTP · 0 clipped · "
-      f"blade drift {loop_rec['frozen']['drift_px']} px · fire {loop_rec['alive']['fire_motion']} · "
-      f"{loop_rec['frames']} frames", flush=True)
+      f"cover {_cover_line} · {loop_rec['frames']} frames", flush=True)
 clock("DONE")
