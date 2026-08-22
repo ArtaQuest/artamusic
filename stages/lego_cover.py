@@ -42,7 +42,7 @@ PINS = {
     "wan_file": "wan2.1-t2v-14b-Q4_K_M.gguf",
     "lego_lora": ("Remade-AI/Lego", "3f7938015b2537238f9e4f17b8896ddceac9cbe7"),
     "lora_file": "lego_35_epochs.safetensors",
-    "shot_sha": "6e3a3c8882dd6ee420e55cc407ccd360719f529b",
+    "shot_sha": "712516cc1b1ae897ba0759602482aae994c2eba1",
     "tools_sha": "25d6c9f7496fb882f28d205b0870c48ec4d7e040",
 }
 
