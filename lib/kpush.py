@@ -429,6 +429,19 @@ if __name__ == "__main__":
         if needs and not a.internet:
             sys.exit(f"refusing to push: {a.py} uses {', '.join(needs)} but --internet was not "
                      f"given, so the kernel will fail at its first fetch with a DNS error")
+        # AND THE SAME FOR MOUNTS. A record notebook globbed /kaggle/input for a reference vocal it
+        # needs, and was pushed without --kernel-source: the cover stage ran for THREE HOURS, wrote
+        # everything correctly, and then the song stage died on its first assert because nothing
+        # was mounted. The source names the kernel it wants in its own assert message; the push can
+        # read it as easily as a human can.
+        import re as _rk
+        _wants = set(_rk.findall(r'kernel source ([\w-]+/[\w-]+)', src))
+        _have = {k.strip() for k in a.kernel_source}
+        _missing = sorted(_wants - _have)
+        if _missing:
+            sys.exit(f"refusing to push: {a.py} expects {', '.join(_missing)} mounted under "
+                     f"/kaggle/input but no --kernel-source says so. It would run to the point of "
+                     f"needing it and then fail on an empty glob.")
         r = call(api().kernels_push, str(f), timeout=None, acc=None)
         url = getattr(r, "url", None) or ""
         print("error:", getattr(r, "error", None), "| url:", url)
