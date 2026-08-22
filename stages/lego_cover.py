@@ -57,9 +57,22 @@ def clock(tag):
     print(f"  ⏱ {tag} · t+{(time.time()-T0)/60:.1f} min", flush=True)
 
 # %%
+# torchao>=0.16 IS THE WHOLE REASON THE LoRA DID NOT APPLY. The first run reported
+#   ImportError: Found an incompatible version of torchao. Found version 0.10.0, but only
+#   versions above 0.16.0 are supported
+# which is a dependency check, not an architectural limit — it failed BEFORE reaching the question
+# this notebook exists to answer. Kaggle ships 0.10.0 preinstalled. Upgrading it is the difference
+# between "a LoRA cannot attach to a quantised transformer" and "nobody installed the right
+# torchao", and those are very different conclusions to draw.
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "diffusers==0.39.0",
                 "transformers>=5.13", "accelerate", "safetensors", "sentencepiece", "protobuf",
-                "gguf>=0.10.0", "peft", "ftfy", "imageio", "imageio-ffmpeg"], check=True)
+                "gguf>=0.10.0", "peft", "torchao>=0.16.0", "ftfy", "imageio", "imageio-ffmpeg"],
+               check=True)
+import importlib.metadata as _md
+try:
+    print("  torchao:", _md.version("torchao"), flush=True)
+except Exception:
+    print("  torchao: not installed", flush=True)
 import numpy as np, torch
 from PIL import Image
 np.random.seed(SEED); torch.manual_seed(SEED)
