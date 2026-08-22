@@ -52,7 +52,7 @@ PINS = {
     "wan_high": "HighNoise/Wan2.2-T2V-A14B-HighNoise-Q4_K_M.gguf",
     "wan_low": "LowNoise/Wan2.2-T2V-A14B-LowNoise-Q4_K_M.gguf",
     "shot_sha": "fa6f8dc3823879dcf42b2d712358520006a3b887",   # ArtaQuest/artamusic song/shot_steel.json
-    "tools_sha": "bdb2f6e11db050b28d11d6dbcc996f131de252f3",
+    "tools_sha": "25d6c9f7496fb882f28d205b0870c48ec4d7e040",
 }
 
 def sh(c, quiet=False):
