@@ -54,6 +54,18 @@ def peak_frame(mp4, px=560):
 
 
 V = json.loads((RUN / "loop_verify.json").read_text())
+
+# MEASURE THE FILE THIS PAGE EMBEDS, rather than reprint the run's own record of it. The run
+# reported a seam of 0.80x for a file that wrapped at 1.78x -- the report repeated the 0.80
+# faithfully, and was wrong about the only thing a reader can check by watching. Both numbers were
+# honestly recorded; only one of them is about the video on the page.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import stillness as _S, looper as _L
+_lp = pick(RUN, "STEEL_cover_loop.mp4") or pick(RUN, "cover_loop.mp4")
+DELIVERED = {}
+if _lp:
+    _fr = _S.frames_of(str(RUN / _lp) if not str(_lp).startswith("/") else str(_lp))
+    DELIVERED = {"frames": len(_fr), "wrap": round(_L.delivered_wrap(_fr), 2)}
 P = json.loads((RUN / "prompt.json").read_text()) if (RUN / "prompt.json").exists() else {}
 CYC = V.get("cycle") or {}
 LORA = V.get("lora_applied")
@@ -73,7 +85,9 @@ if RIVAL:
         except Exception as e:
             print("  (comparison skipped:", str(e)[:60], ")")
 
-lora_line = ("" if LORA is None else
+lora_line = ('<p class="prose"><b>No style adapter was used.</b> The LEGO look here comes from the '
+             'prompt alone, on the base text-to-video model — which is the finding: the '
+             'Remade-AI LEGO LoRA turned out not to be needed for it.</p>' if LORA is None else
              ('<p class="prose"><b>The LEGO LoRA attached to the quantised transformer.</b> '
               'These frames are the adapter\'s work.</p>' if LORA else
               '<p class="prose"><b>The LEGO LoRA did not attach</b> — so these frames are the base '
@@ -134,15 +148,19 @@ HTML = f"""<title>The Steel Rebuild</title>
   </div>
 
   <figure><video src="{loop_uri}" autoplay loop muted playsinline></video>
-    <figcaption>The delivered loop — {V.get('frames','—')} frames, {V.get('seconds','—')}s, closed by
+    <figcaption>The delivered loop — {DELIVERED.get('frames', V.get('frames','—'))} frames, {V.get('seconds','—')}s, closed by
     <b>{CYC.get('used','—')}</b>.</figcaption></figure>
   {lora_line}
 
   <div class="grid">
-    <div class="card"><div class="num">{CYC.get('seam_vs_typical','—')}</div><h3>seam vs a normal frame step</h3>
-      <p>Under 1.0 means the cut is less visible than an ordinary step between frames. The whole clip scores {CYC.get('whole_vs_typical','—')}.</p></div>
+    <div class="card"><div class="num">{DELIVERED.get('wrap','—')}</div><h3>wrap of the delivered file</h3>
+      <p><b>1.00 is seamless</b> — the step from the last frame back to the first is exactly one ordinary
+      frame step. Measured on the video above, not on the generation it was cut from. Under 1.0 is not
+      better: it means the motion stalls. The uncut clip wraps at {CYC.get('whole_vs_typical','—')}.</p></div>
     <div class="card"><div class="num">{V.get('seconds','—')}s</div><h3>loop length</h3>
-      <p>{CYC.get('frames','—')} frames at {V.get('fps','—')} fps. The policy takes the longest cut that is still invisible, not the tightest.</p></div>
+      <p>{DELIVERED.get('frames', CYC.get('frames','—'))} frames at {V.get('fps','—')} fps, cut as
+      <code>{CYC.get('used','—')}</code>. Every candidate cut was assembled and measured; the one whose
+      wrap lands nearest 1.00 wins, and ties go to whichever invents the fewest frames.</p></div>
     <div class="card"><div class="num">{V.get('steps','—')}</div><h3>denoising steps</h3>
       <p>At {V.get('seconds_per_step','—')} s each, with real guidance — the step count measured from two timed steps, not guessed.</p></div>
     <div class="card"><div class="num">{V.get('gen_seconds',0)/60:.0f}m</div><h3>to generate</h3>
@@ -162,4 +180,5 @@ HTML = f"""<title>The Steel Rebuild</title>
 """
 OUT.write_text(HTML)
 print(f"wrote {OUT} ({OUT.stat().st_size/1e6:.2f} MB)")
-print(f"  loop {V.get('frames')} frames · seam {CYC.get('seam_vs_typical')}x · lora_applied={LORA}")
+print(f"  loop {DELIVERED.get('frames')} frames · wrap {DELIVERED.get('wrap')} (1.00 seamless) "
+      f"· cut {CYC.get('used')} · lora_applied={LORA}")
