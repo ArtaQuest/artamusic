@@ -127,6 +127,71 @@ def cycle_report(frames, min_frames=24, prefer_longest=True):
             "whole_vs_typical": round(naive / max(typical, 1e-6), 2)}
 
 
+def delivered_wrap(fr):
+    """The wrap of the frames AS THEY WILL BE WRITTEN, relative to an ordinary step between them.
+
+    This is the only number that describes what a viewer sees. `cycle_report`'s `seam_vs_typical`
+    is a PROXY scored on the generation before any cutting, and on the LEGO take the two disagreed
+    badly: the cut point scored 0.80 while the file that shipped wrapped at 1.78 — visibly. A
+    proxy is fine for CHOOSING among cuts; it must never be the figure we publish.
+    """
+    v = _small(fr)
+    v = v - v.mean(1, keepdims=True)
+    v /= np.maximum(np.sqrt((v * v).mean(1, keepdims=True)), 1e-6)
+    steps = np.abs(np.diff(v, axis=0)).mean(1)
+    return float(np.abs(v[-1] - v[0]).mean() / max(float(np.median(steps)), 1e-6))
+
+
+def dissolve(fr, xf):
+    if xf <= 0 or len(fr) < 2 * xf + 2:
+        return fr
+    w = (np.arange(1, xf + 1) / (xf + 1))[:, None, None, None]
+    blend = ((1 - w) * fr[-xf:].astype(np.float32) + w * fr[:xf].astype(np.float32))
+    return np.concatenate([fr[xf:len(fr) - xf], blend.round().astype(np.uint8)])
+
+
+def close_loop(frames, min_frames=24, min_keep=16):
+    """Close the clip into a loop by BUILDING each option and measuring it, not by ruling.
+
+    Every previous version decided from the proxy score and a threshold, and got it wrong twice
+    over on the same clip: it sliced [start:end + 1] when `end` is exclusive (keeping a duplicate
+    of the first frame), and it then dissolved a cycle that was already clean, which blends frames
+    two and three apart and MANUFACTURES the jump the dissolve exists to hide -- 1.65x with it
+    against 1.08x without. Neither mistake is visible in the proxy, because the proxy never looks
+    at the assembled frames. So assemble every candidate and measure it.
+
+    Returns (loop_frames, report). The report's `wrap_vs_typical` is measured on `loop_frames`.
+    """
+    r = cycle_report(frames, min_frames=min_frames)
+    i, j = r["start"], r["end"]
+    opts = []
+    if j - i >= min_keep:                       # `end` is EXCLUSIVE: frames[j] duplicates frames[i]
+        opts.append(("cycle", frames[i:j]))
+        opts.append(("cycle+1", frames[i:j + 1]))
+        for xf in (3, 6):
+            opts.append((f"cycle+dissolve{xf}", dissolve(frames[i:j], xf)))
+    for xf in (0, 3, 6, 8):
+        opts.append((f"whole+dissolve{xf}" if xf else "whole", dissolve(frames[:-1], xf)))
+    # A PERFECT LOOP WRAPS AT 1.0, NOT AT 0. The wrap is the step from the last frame back to the
+    # first, so a seamless cycle advances across it by exactly one ordinary step. Minimising the
+    # wrap instead rewards a STALL: the selftest's period-12 clip chose a 49-frame cut wrapping at
+    # 0.46 over the true 48-frame cycle at 1.00, and that 49th frame is a duplicate of the first --
+    # the hammer freezes for a frame every cycle. Score the DISTANCE FROM ONE.
+    scored = [(name, fr, delivered_wrap(fr)) for name, fr in opts if len(fr) >= min_keep]
+    # On a tie, take the option that alters the fewest frames: a plain cut ships the model's own
+    # frames, a dissolve invents three, and cycle+1 repeats one. Wan2.2 tied `cycle` with `cycle+1`
+    # at 1.05 and the duplicate must not win that.
+    rank = {"cycle": 0, "whole": 0, "cycle+1": 2}
+    scored.sort(key=lambda c: (round(abs(c[2] - 1.0), 2), rank.get(c[0], 1)))
+    name, loop, wrap = scored[0]
+    r.update({"used": name, "wrap_vs_typical": round(wrap, 2), "loop_frames": int(len(loop)),
+              "options": {n: round(w, 2) for n, _, w in scored}})
+    print(f"  loop: {name} · {len(loop)} frames · wrap {wrap:.2f}x a normal step "
+          f"(1.00 is seamless; proxy said {r['seam_vs_typical']}x) · considered "
+          + ", ".join(f"{n} {w:.2f}" for n, _, w in scored), flush=True)
+    return loop, r
+
+
 def selftest():
     """A clip built from a KNOWN cycle must be found; a clip with no cycle must not be claimed."""
     ok = True
@@ -167,6 +232,21 @@ def selftest():
     ok &= good2
     print(f"   monotonic drift, no cycle   seam/typical {r2['seam_vs_typical']:.2f} "
           f"(want > 1.0, i.e. no cycle claimed) -> {'ok' if good2 else 'FAIL'}")
+    # A CLEAN CYCLE MUST NOT BE DISSOLVED, AND MUST NOT KEEP THE DUPLICATE FRAME. Both were live
+    # bugs: [start:end + 1] kept a copy of the first frame, and dissolving on top blended frames
+    # two and three apart. Each is invisible to the proxy score and plain in the delivered wrap.
+    loop, rep = close_loop(clip, min_frames=8)
+    per, plain = len(loop) % 12 == 0, rep["used"] in ("cycle", "whole")
+    tight = abs(rep["wrap_vs_typical"] - 1.0) < 0.35
+    ok &= per and plain and tight
+    print(f"   close_loop on the periodic clip  used {rep['used']} · {len(loop)} frames · "
+          f"wrap {rep['wrap_vs_typical']} -> {'ok' if (per and plain and tight) else 'FAIL'}")
+
+    # ...and the measurement must be able to CONDEMN, or it is decorative and would pass anything.
+    bad = delivered_wrap(drift[:40])
+    ok &= bad > 1.6
+    print(f"   a drift cut arbitrarily          wrap {bad:.2f} (want > 1.6) -> {'ok' if bad > 1.6 else 'FAIL'}")
+
     print("   " + ("ALL PASSED" if ok else "FAILURES"))
     return ok
 

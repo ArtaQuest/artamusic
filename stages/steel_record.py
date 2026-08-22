@@ -281,7 +281,10 @@ BPM, KEYSCALE = 100, "F minor"   # match the conditioning reference; a key fight
 # to return to where it began. That works, and it costs the thing the shot is for: the model spends
 # the clip travelling back, and the fire barely moves. Measured, the bill was plain — the pinned
 # generation scored 0.26 on fire motion against a floor of 1.0, and 1.70 for the loop that visibly
-# lived. So there is no pin. The wrap is closed by an 8‑frame dissolve of tail into head instead.
+# lived. So there is no pin. The wrap is closed by CUTTING ON A REAL CYCLE where the clip has
+# one, and only cross-fading where it does not — `looper.close_loop` builds every candidate
+# and measures the wrap of each, because the cut that scores best on the generation is not
+# the one that reads best in the file.
 #
 # And the sword does not hold still because the sampler was asked nicely. It is **painted out of
 # the photograph** by heat‑diffusion inpainting, the empty forge is animated, and the sword is
@@ -554,30 +557,18 @@ def stage_cover():
         sh(f"ffmpeg -v error -i '{base}_raw.mp4' -vf scale=1080:1080:flags=lanczos -c:v libvpx-vp9 "
            f"-crf 33 -b:v 0 -row-mt 1 -cpu-used 1 -pix_fmt yuv420p -an '{base}_1080.webm' -y", quiet=True)
 
-    def dissolve(fr, xf):
-        if xf <= 0 or len(fr) < 2 * xf + 2:
-            return fr
-        w = (np.arange(1, xf + 1) / (xf + 1))[:, None, None, None]
-        blend = ((1 - w) * fr[-xf:].astype(np.float32) + w * fr[:xf].astype(np.float32)).round().astype(np.uint8)
-        return np.concatenate([fr[xf:len(fr) - xf], blend])
-
     def close_loop(fr):
-        # THE LOOP IS CLOSED ON A REAL CYCLE, not a cross-fade. A hammer at the top of its swing
-        # dissolved into one at the bottom is a morph and reads as one. The clip is searched for
-        # the pair of frames that genuinely match in position AND velocity — the whole clip
-        # included, which is the option that needs no justification and was once missing — and the
-        # cut is taken only when it is less visible than an ordinary frame-to-frame step.
+        # THE LOOP IS CLOSED BY MEASURING THE FRAMES THAT SHIP, not by a rule over a proxy score.
+        # The rule was wrong twice on one clip: it sliced [start:end + 1] when `end` is exclusive,
+        # keeping a duplicate of the first frame, and it dissolved a cycle that was already clean,
+        # which blends frames two and three apart and MANUFACTURES the jump a dissolve exists to
+        # hide. The delivered wrap went 1.08 -> 1.65 because of it, while the proxy still read
+        # 0.80 and reported success. `L.close_loop` assembles every candidate and measures each.
+        # It targets a wrap of 1.00 — one ordinary step from last frame back to first, which is
+        # what seamless means; driving it toward 0 instead buys a stall on a duplicated frame.
         nonlocal CYCLE
-        CYCLE = L.cycle_report(fr, min_frames=max(24, len(fr) // 3))
-        print(f"  cycle {CYCLE['start']}..{CYCLE['end']} ({CYCLE['frames']} frames) · seam "
-              f"{CYCLE['seam_vs_typical']}x a normal step · whole clip "
-              f"{CYCLE['whole_vs_typical']}x · whole chosen={CYCLE['whole_clip_chosen']}", flush=True)
-        if CYCLE["seam_vs_typical"] < 1.0:
-            CYCLE["used"] = "cycle"
-            return dissolve(fr[CYCLE["start"]:CYCLE["end"] + 1],
-                            8 if CYCLE["whole_clip_chosen"] else 3)
-        CYCLE["used"] = "dissolve"
-        return dissolve(fr[:-1], XF)
+        out, CYCLE = L.close_loop(fr, min_frames=max(24, len(fr) // 3))
+        return out
 
     still = frames[0]
     raw_loop = close_loop(frames)
@@ -676,8 +667,9 @@ def stage_cover():
     rec = {"model": f"Wan2.2-T2V-A14B Q4_K_M ({GREPO})", "hashes": HASHES, "seed": SEED,
            "steps": STEPS, "seconds_per_step": round(per_step, 1), "guidance": [4.0, 3.0],
            "res": [H, W], "frames": int(len(loop)), "fps": FPS, "gen_seconds": round(gen_s, 1),
-           "method": ("text-to-video, no still image and no image conditioning; loop closed by an "
-                      f"{XF}-frame dissolve"
+           "method": ("text-to-video, no still image and no image conditioning; loop closed as "
+                      f"{CYCLE.get('used', '?')} at a measured wrap of {CYCLE.get('wrap_vs_typical', '?')}x "
+                      "an ordinary frame step (1.00 is seamless)"
                       + ("; the sword composited back frozen and re-lit because it drifted"
                          if needs_freeze else "; the sword held still on its own and was left alone")),
            "froze_the_blade": needs_freeze, "relight_ladder": ladder,
