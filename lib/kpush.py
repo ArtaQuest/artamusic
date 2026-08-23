@@ -247,6 +247,24 @@ def precheck_source(py):
     # and its lyric from this repo at a commit sha. Edit one of those files, forget to push or to
     # bump the sha, and the kernel runs the version you no longer have — no error, no warning, just
     # a measurement taken with an instrument you think you replaced. So: for every pinned file that
+
+    # A LoRA NEEDS torchao >= 0.16.0, AND THE REFUSAL IS SILENT. diffusers raises ImportError from
+    # inside `load_lora_weights`, which every caller wraps in a try/except so a missing adapter does
+    # not kill a two-hour generation. Kaggle's image ships 0.10.0. So the run continues, produces a
+    # cover with no adapter on it, and says so in one line among nine hundred — which is how a
+    # record shipped unstyled after the same diagnosis had already been made and fixed ELSEWHERE.
+    # peft is what performs the injection; without it the same path fails the same quiet way.
+    _src_txt = Path(py).read_text()
+    if "load_lora_weights" in _src_txt or "load_lora_adapter" in _src_txt:
+        _miss = [n for n, pat in (("torchao>=0.16.0", r"torchao>=0\.(1[6-9]|[2-9]\d)"), ("peft", r"[\s'\"]peft[\s'\"]"))
+                 if not re.search(pat, _src_txt)]
+        if _miss:
+            raise RuntimeError(
+                f"{py}: loads a LoRA but does not pip install {', '.join(_miss)} — diffusers refuses "
+                "the LoRA path below torchao 0.16.0 and Kaggle ships 0.10.0. The refusal is an "
+                "ImportError swallowed by the adapter's own try/except, so the run would finish "
+                "two hours later with no adapter applied. Refusing to push.")
+
     # also exists in this working tree, fetch what the pin actually serves and compare the bytes.
     import re as _re2, urllib.request as _ur, hashlib as _hl
     _text = Path(_src).read_text()

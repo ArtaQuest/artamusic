@@ -121,6 +121,7 @@ if not REPO.exists():
 sh("pip install -q 'demucs>=4.0.1' faster-whisper==1.2.1 hf_transfer toml python-dotenv modelscope "
    "diskcache py3langid pyloudnorm ffmpeg-python soundfile loguru einops accelerate numba scipy "
    "'safetensors>=0.7.0' 'transformers>=4.51.0,<4.58.0' diffusers==0.39.0 "
+   "'torchao>=0.16.0' peft "
    "vector-quantize-pytorch 'gguf>=0.10.0' ftfy sentencepiece protobuf imageio imageio-ffmpeg "
    "matchering 2>&1 | tail -2")
 if PASCAL:
@@ -132,6 +133,10 @@ np.random.seed(SEED)
 import torch
 torch.manual_seed(SEED)
 import diffusers, transformers
+import torchao as _tao
+_tv = tuple(int(x) for x in _tao.__version__.split(".")[:2])
+assert _tv >= (0, 16), (f"torchao {_tao.__version__} — diffusers refuses to load a LoRA below "
+                        "0.16.0 and the adapter would be silently skipped two hours from now")
 NGPU = torch.cuda.device_count()
 print(f"torch {torch.__version__} · diffusers {diffusers.__version__} · transformers "
       f"{transformers.__version__} · cuda devices {NGPU} "
