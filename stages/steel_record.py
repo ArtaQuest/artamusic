@@ -43,9 +43,9 @@ T_START = time.time()
 PINS = {
     "ace_step_code": "6d467e4b5081ccb0abf1ec1bf4fdf9051a2d34b0",   # github.com/ACE-Step/ACE-Step-1.5
     "song_model": "acestep-v15-xl-sft",
-    "measure_sha": "17b49399cfd6c24f4070353fc33643ae15e1331d",      # ArtaQuest/artamusic lib/measure.py
+    "measure_sha": "6b048ce9e284a4b5017943b532c3084d59ae35a2",      # ArtaQuest/artamusic lib/measure.py
     "lyric_profile_sha": "ebee5bf324d8a6cff22ba666825a777c7dfc5c39",  # ArtaQuest/artamusic lib/lyric_profile.py
-    "lyric_sha": "88348bd9e0d21d196cb95c54c20b2943a629c68a",
+    "lyric_sha": "6b048ce9e284a4b5017943b532c3084d59ae35a2",
     "shot_sha": "f8ec81cddd037b729df93d48b7b0c83ab5d14f64",   # ArtaQuest/artamusic song/shot_lego.json
     "lego_lora": ("Remade-AI/Lego", "3f7938015b2537238f9e4f17b8896ddceac9cbe7"),
     "lora_file": "lego_35_epochs.safetensors",
@@ -184,34 +184,40 @@ import lyric_profile as LP
 # claiming to be the lyric, differing in their opening lines, with no way to tell which had been
 # measured by anything. The lyric is a published artifact of this project; it belongs in the repo
 # beside the instruments that judge it, and the notebook should read it the same way it reads them.
+# THE CLOCK COMES FIRST, because the lyric is now measured against it. These sat 25 lines BELOW
+# the last lyric assert, which is precisely why nothing could compare the two: a lyric cannot be
+# judged too long for a duration the file has not defined yet.
+DURATION = 180.0
+BPM, KEYSCALE = 100, "F minor"   # match the conditioning reference; a key fight is an experiment,
+                                 # and a publication run is not where you run one
+
 urllib.request.urlretrieve(
     f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['lyric_sha']}/song/lyrics_steel.txt",
     "/tmp/lyrics_steel.txt")
 LYRICS = Path("/tmp/lyrics_steel.txt").read_text().strip()
-assert LYRICS.startswith("[intro]") and "[chorus]" in LYRICS, "the fetched lyric is not a lyric"
+assert LYRICS.startswith("[Intro]") and "[Chorus]" in LYRICS, "the fetched lyric is not a lyric"
 
-# The antiphon as BACKING VOCALS. ACE-Step's lyric convention puts backing/choir parts in
-# (parentheses); marking every "Cut!" that way tells the model the choir shouts the stroke and the
-# lead sings the line — the words the gate measures. Off = the choir is free to sing over the lead.
-ANTIPHON_AS_BACKING = True
-LYRIC_TEXT = LYRICS                 # the words, as written and as measured
-if ANTIPHON_AS_BACKING:
-    SHOUT = "Strike!"          # the lyric's antiphon. It was "Cut!" before the rewrite, and a
-    # stale marker here does not fail — it silently marks NOTHING as backing vocal, and the choir
-    # simply never appears in the mix. So assert the word is actually in the lyric.
-    assert re.search(rf"^{re.escape(SHOUT)} ", LYRICS, re.M), (
-        f"no line starts with {SHOUT!r} — the antiphon marker does not match this lyric, and the "
-        f"choir would be silently dropped from the arrangement")
-    LYRICS = re.sub(rf"^{re.escape(SHOUT)} ", f"({SHOUT}) ", LYRICS, flags=re.M)
+# NO MARKUP LAYER: WHAT IS MEASURED IS WHAT IS SENT IS WHAT SHIPS.
+#
+# This used to wrap every antiphon in parentheses — "(Strike!)" — on the stated ground that
+# "ACE-Step's lyric convention puts backing/choir parts in (parentheses)". That convention does
+# not exist. At the pin, `handler/prompt_utils.py::_format_lyrics` is the whole of the lyric
+# handling and it is one f-string: the text goes to a tokenizer verbatim, with no parser, no tag
+# whitelist and no parenthesis routing. Zero of the 199 official examples put parentheses in a
+# lyric line. So the fourteen shouts were sung as ordinary lead-vocal words and each one spent a
+# line of the bar budget on a hammer blow the model never knew about.
+#
+# Worse than useless: `lyric_profile` DROPS any line starting with "(" (a rule meant for
+# "(identical repeat)" markers), so the markup corrupted the very gate that was supposed to judge
+# the lyric — and the fix built for that was to measure LYRIC_TEXT while singing LYRICS. A gate
+# that reads a different text from the one that ships is not a gate. One text now, all the way
+# through. The choir instruction belongs in CAPTION, which is the only channel the model parses
+# for arrangement.
+assert "(" not in LYRICS, ("parentheses in the lyric: the model has no parser for them and "
+                           "lyric_profile silently drops any line that opens with one")
+LYRIC_TEXT = LYRICS
 (OUT / "STEEL_lyrics.txt").write_text(LYRICS + "\n")
 
-# MEASURE THE WORDS, NOT THE ARRANGEMENT MARKUP. The parentheses are an instruction to the
-# generator about who sings a line, not a change to the line — the choir shouts the same word the
-# lead would. But the clarity instrument treats a parenthesised line as not-the-lead and drops it,
-# which shrinks its denominator: marking fourteen lines as choir moved the inversion rate from
-# 4.3% to 5.4% and would have failed this run's own gate on a lyric that passes. So both
-# instruments read LYRIC_TEXT, and the marked-up version is what goes to the model and ships as
-# the lyric sheet.
 craft = LP.measure(LYRIC_TEXT)
 craft_report = {k: (round(v, 2) if isinstance(v, float) else v) for k, v in craft.items()
                 if k not in ("long_lines", "short_lines")}
@@ -244,12 +250,38 @@ craft_report["clarity"]["verdict"] = clear_bad or ["clear enough to follow on fi
 print("clarity:", json.dumps(craft_report["clarity"]), flush=True)
 assert not clear_bad, "the lyric is not comprehensible on first listen: " + "; ".join(clear_bad)
 
-CAPTION = ("Dark chant anthem. Pounding war drums and anvil strikes on the beat, massive unison "
-           "male chant choir answering a deep gravelly lead vocal, low strings and war horns, "
-           "sparse and martial, minor key, solemn and heavy, 100 BPM.")
-DURATION = 180.0
-BPM, KEYSCALE = 100, "F minor"   # match the conditioning reference; a key fight is an experiment,
-                                 # and a publication run is not where you run one
+# DOES THE LYRIC FIT THE CLOCK? Every gate above measures the WORDS; none asks whether they fit
+# the time available. The previous record passed all of them — craft profile, clarity, and later
+# 87.2% word accuracy on the finished audio — and was still crammed: 414 words over 135.2 s of
+# singing is 3.06 words a second, sustained for three minutes. At the pin, that lyric is denser
+# than all 199 of ACE-Step's own official examples, including the rap ones. The model had nowhere
+# to hold a note, so it did not. This is arithmetic, it needs no GPU, and it runs before one is
+# spent.
+urllib.request.urlretrieve(
+    f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['lyric_sha']}/lib/songfit.py",
+    "/tmp/songfit.py")
+import songfit as SF
+assert SF.selftest(), "the songfit instrument fails its own selftest — its numbers mean nothing"
+fit = SF.measure(LYRIC_TEXT, DURATION, BPM)
+fit_bad = SF.verdict(fit)
+craft_report["songfit"] = fit
+craft_report["songfit"]["verdict"] = fit_bad or ["fits the clock"]
+(WORK / "lyric_craft.json").write_text(json.dumps(craft_report, indent=2))
+print("songfit:", json.dumps(fit), flush=True)
+assert not fit_bad, "the lyric does not fit the clock: " + "; ".join(fit_bad)
+
+# THE CAPTION IS THE ONLY CHANNEL THE MODEL PARSES FOR ARRANGEMENT, and the old one named six
+# sound sources, all playing at once, with no verb of change in it: "anvil strikes on the beat" is
+# an instruction never to vary, and "sparse and martial" sat in the same clause as "massive" and
+# "pounding". It described a static instant, and the take obeyed. BPM and key are dropped here
+# because they already arrive on a stronger channel as their own metas block.
+CAPTION = ("Dark chant anthem that builds. Opens on a lone anvil struck slow in a big stone room "
+           "and one far war horn, no drums. War drums enter and the verses stay lean: a deep "
+           "gravelly male lead over drums and a low drone, space between the lines. The chorus "
+           "opens out into a massive unison male chant choir answering the lead, horns and low "
+           "strings behind it. The bridge drops to one voice and one struck anvil, drums out. The "
+           "last chorus returns bigger, then the drums stop and the anvil rings out alone. "
+           "Solemn, martial, heavy.")
 
 # %% [markdown]
 # ## The cover — asked of a video model, not assembled from a picture
@@ -924,10 +956,26 @@ def render_conf(name, seed, strength, rung, steps, duration):
             "offload_to_cpu": rung["offload_to_cpu"], "offload_dit_to_cpu": rung["offload_dit_to_cpu"],
             "task_type": "text2music", "reference_audio": MALE_REF, "audio_cover_strength": strength,
             "caption": CAPTION, "lyrics": LYRICS, "instrumental": False,
-            "bpm": BPM, "keyscale": KEYSCALE, "timesignature": "4/4", "vocal_language": "en",
+            "bpm": BPM, "keyscale": KEYSCALE, "timesignature": "4",     # constants.py: VALID_TIME_SIGNATURES = [2, 3, 4, 6]. 182 of 199
+                                      # examples use "4" and none uses "4/4"; the only normaliser
+                                      # that would strip the "/4" lives in the LM path. "vocal_language": "en",
             "duration": duration, "inference_steps": steps, "guidance_scale": 7.5,
+            # SET shift EXPLICITLY. At the pin, model_discovery.py's _BASE_DEFAULTS give
+            # turbo shift 3.0 and BOTH base and sft shift 1.0 — but cli.py hardcodes 3.0 into its
+            # defaults namespace (twice), and the TOML loader only setattr's keys that are PRESENT
+            # in the file. This conf never set it, so every take of this SFT model has been sampled
+            # on the turbo noise schedule. Not a tuning choice: a default that is wrong for this
+            # checkpoint, silently.
+            "shift": 1.0,
+            # 199 of 199 official examples ship think=true. inference.py gates the structure
+            # planning LM on (thinking or any use_cot_*), so it has been OFF and the DiT has been
+            # denoising with precomputed_lm_hints_25Hz=None — no plan for where the energy goes,
+            # which is exactly the flatness this rebuild is chasing. Every use_cot_* stays False,
+            # so the LM plans structure and touches none of our pinned metadata: inference.py only
+            # fills a CoT value where the user field is empty, and ours are all set.
+            "thinking": True,
             "seed": seed, "infer_method": "ode",
-            "thinking": False, "use_cot_metas": False, "use_cot_caption": False,
+            "use_cot_metas": False, "use_cot_caption": False,
             "use_cot_lyrics": False, "use_cot_language": False,
             "batch_size": 1, "use_random_seed": False, "seeds": [seed]}
 
@@ -999,14 +1047,20 @@ for seed, strength in CANDIDATES:
         continue
     row.update(register=reg, word_accuracy=round(acc, 3), asr_judge=_WH[1])
     ok_words = acc >= 0.75
-    row["verdict"] = "PASS" if (ok_reg and ok_words) else \
-        f"REJECTED ({reg.get('register')}{'' if ok_words else f' words {acc*100:.0f}%'})"
+    # DOES IT EVER STOP? Word accuracy, loudness, dynamic range, true peak and clipping all
+    # average over the time axis, and a hole is a small part of an average — so a take with seven
+    # of them passed every one of these gates and shipped. Judge the take, not just its mean.
+    cont = M.continuity(mp3); row["continuity"] = cont
+    cont_bad = M.continuity_verdict(cont); ok_cont = not cont_bad
+    row["verdict"] = "PASS" if (ok_reg and ok_words and ok_cont) else \
+        f"REJECTED ({reg.get('register')}{'' if ok_words else f' words {acc*100:.0f}%'}"\
+        f"{'' if ok_cont else ' · ' + cont_bad[0]})"
     gate_log.append(row); (WORK / "gate.json").write_text(json.dumps(gate_log, indent=2))
     print(f"{name}: median={reg.get('f0_hz')}Hz [{reg.get('register')}] "
           f"spread={reg.get('spread_st')}st lead={reg.get('lead_hz')}Hz@{reg.get('lead_frac')} "
           f"stem={row.get('stem_dbfs')}dBFS words={acc*100:.1f}% -> {row['verdict']} · "
           f"{row['seconds']:.0f}s", flush=True)
-    if ok_reg and ok_words:
+    if ok_reg and ok_words and ok_cont:
         passers.append((acc, -float(reg.get("spread_st") or 99), mp3, seed))
     clock(f"{name} gated")
 
@@ -1201,6 +1255,12 @@ tp = Lm.get("true_peak_dbtp")
 if tp is not None and tp > TARGET_TP + 0.05: problems.append(f"true peak {tp} dBTP over target")
 if rep.get("seconds") and abs(rep["seconds"] - DURATION) > 5:
     problems.append(f"duration {rep['seconds']}s vs {DURATION}s")
+# AND ON THE DELIVERED MASTER, not only on the take. record-final and record-v2 are the same
+# lyric through the same pipeline, and record-final carries 9.8 s of holes while record-v2 carries
+# none — the difference is downstream of the take, and the master arm is chosen by word accuracy
+# alone against a reference that itself has 4.2 s of dropout. Mastering can import silence.
+_cont = M.continuity(str(mp3)); verify["continuity"] = _cont
+problems += M.continuity_verdict(_cont)
 # THE COVER, JUDGED INSIDE THE SUBJECT'S OWN MASK. What used to be here were four whole-frame
 # luma statistics — cuts, wrap ratio, mean motion, black frames — and a cover shipped that passed
 # every one of them with a blade that drifted 18 px, because a global average cannot see a subject
