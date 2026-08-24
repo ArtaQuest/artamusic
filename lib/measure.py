@@ -234,6 +234,77 @@ def tempo(x, sr):
     return {"bpm": round(60.0/(best*hop/sr),2)}
 
 
+def continuity(path, drop_db=20.0, min_run_s=0.4, edge_s=3.0):
+    """Does the arrangement ever STOP? Every other audio gate here is a whole-track scalar.
+
+    Loudness, dynamic range, true peak, clipping and word accuracy are all satisfied by a track
+    with holes punched in it — they average over the time axis, and a hole is a small part of an
+    average. The record that shipped had SEVEN of them, 9.8 s in total, four inside the first
+    eighteen seconds at roughly 4.7 s spacing, and it passed every gate the notebook had.
+
+    Three sibling seeds showed holes at the same timestamps, so it is not seed noise: with no
+    wordless section anywhere in the lyric, the model manufactured its own intro space by cutting
+    the track. The rebuilt lyric gives it real instrumental blocks instead.
+
+    A frame counts as dropped when it sits `drop_db` below the track's OWN 95th-percentile frame
+    level — relative, so a quiet mix is not condemned for being quiet. Head and tail are ignored:
+    a fade is not a dropout.
+    """
+    x, sr = load(path, mono=True)
+    hop = max(1, int(0.046 * sr))
+    nf = len(x) // hop
+    if nf < 10:
+        return {"dropouts": 0, "dropout_s": 0.0, "longest_dropout_s": 0.0,
+                "longest_loud_run_s": round(len(x) / sr, 1), "at": []}
+    rms = np.sqrt((x[:nf * hop].reshape(nf, hop) ** 2).mean(1))
+    db = 20 * np.log10(np.maximum(rms, 1e-12))
+    quiet = db < (np.percentile(db, 95) - drop_db)
+    inner = quiet.copy()
+    e = min(nf // 2, int(edge_s * sr / hop))
+    inner[:e] = False
+    inner[nf - e:] = False
+    runs, at, i = [], [], 0
+    while i < nf:
+        if inner[i]:
+            j = i
+            while j < nf and inner[j]:
+                j += 1
+            if (j - i) * hop / sr >= min_run_s:
+                runs.append((j - i) * hop / sr)
+                at.append(round(i * hop / sr, 2))
+            i = j
+        else:
+            i += 1
+    best = cur = 0
+    for v in ~quiet:
+        cur = cur + 1 if v else 0
+        best = max(best, cur)
+    return {"dropouts": len(runs), "dropout_s": round(float(sum(runs)), 2),
+            "longest_dropout_s": round(float(max(runs, default=0.0)), 2),
+            "longest_loud_run_s": round(best * hop / sr, 1), "at": at[:10]}
+
+
+# Calibrated against this pipeline's own corpus, with the headroom stated. The take under review
+# scored 7 dropouts / 9.80 s / 10.4 s longest run and fails all three. The tightest PASSING record
+# is the conditioning reference at 4.23 s of dropout (30% headroom) and STEEL v1 at an 18.9 s
+# longest run (18% headroom) — a bar set nearer than that to a known-good record fires eventually.
+CONTINUITY = {"dropout_s_max": 6.0, "dropouts_max": 5, "longest_loud_run_s_min": 16.0}
+
+
+def continuity_verdict(c):
+    out = []
+    if c["dropout_s"] > CONTINUITY["dropout_s_max"]:
+        out.append(f"the arrangement stops for {c['dropout_s']}s across {c['dropouts']} holes "
+                   f"(at {c['at']}) — limit {CONTINUITY['dropout_s_max']}s")
+    if c["dropouts"] > CONTINUITY["dropouts_max"]:
+        out.append(f"{c['dropouts']} separate holes in the track — limit "
+                   f"{CONTINUITY['dropouts_max']}")
+    if c["longest_loud_run_s"] < CONTINUITY["longest_loud_run_s_min"]:
+        out.append(f"never plays for more than {c['longest_loud_run_s']}s unbroken — floor "
+                   f"{CONTINUITY['longest_loud_run_s_min']}s")
+    return out
+
+
 def report(path, ref=None):
     st, sr = load(path); mono = st.mean(1)
     b = bands(mono, sr)
