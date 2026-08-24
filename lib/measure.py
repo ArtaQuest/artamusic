@@ -81,7 +81,7 @@ def _row(**kw):
     because the stem was missing — a downstream crash on the failure path is how a gate stops
     gating."""
     r = {"register": "unknown", "f0_hz": None, "q1_hz": None, "q3_hz": None, "spread_st": None,
-         "lead_hz": None, "lead_frac": None, "oct_up_frac": None, "voiced_s": 0.0,
+         "lead_hz": None, "lead_frac": None, "oct_up_frac": None, "folded_frac": None, "voiced_s": 0.0,
          "frames": 0, "bands": {}}
     r.update(kw)
     return r
@@ -117,6 +117,12 @@ def register(path, hop_div=2):
     # past a length check, and detonates in np.histogram with "autodetected range of [nan, nan]".
     # That killed a publication run three hours in, after the cover and the first take were already
     # made. An unvoiced frame is not a measurement: drop it, and judge on what is left.
+    return classify_f0(f0, hop_div)
+
+
+def classify_f0(f0, hop_div=2):
+    """Everything register() decides, on a bare f0 track — split out so the selftest can feed it
+    KNOWN voice configurations without a demucs run. register() is demucs + YIN + this."""
     f0 = finite_f0(f0)
     if len(f0) < 40:
         return _row(register="unknown", frames=int(len(f0)))
@@ -136,6 +142,29 @@ def register(path, hop_div=2):
     lead_frac = float((within <= 3.0).mean())          # frames belonging to the lead
     oct_up = 12 * np.log2(f0 / lead_hz)
     oct_up_frac = float((np.abs(oct_up - 12.0) <= 0.5).mean())   # a second voice an octave above
+
+    # FOLD THE OCTAVE DOUBLE BEFORE CLASSIFYING — under a guard, because folding is dangerous.
+    #
+    # A unison chant choir answering a deep male lead sings THE SAME LINE an octave up, and YIN
+    # doubles rough voices on its own; both land in the female band and drag the median into the
+    # overlap. A real take did exactly this: lead mode 88.7 Hz carrying 25.6% of frames, an
+    # octave-up mass of 25.5%, median 172 → "ambiguous", REJECTED — on a stem whose exposed verses
+    # measure 130 Hz and whose one high-median section turns out to be near-silent residual.
+    #
+    # The guard is what keeps this from resurrecting the old false positive (a female take whose
+    # 9.1% of low bleed once read as a male lead): folding happens ONLY when the lead mode itself
+    # is a male-band voice carrying at least 20% of the frames — bleed never qualifies — and only
+    # frames within 0.75 st of EXACTLY one octave above that lead are folded. A genuine female
+    # lead is not an octave above a well-supported male mode, so she is left where she sings.
+    folded_frac = 0.0
+    if MALE_MIN <= lead_hz < MALE_MAX and lead_frac >= 0.20:
+        octave = np.abs(oct_up - 12.0) <= 0.75
+        folded_frac = float(octave.mean())
+        if folded_frac > 0.0:
+            f0 = np.where(octave, f0 / 2.0, f0)
+            med = float(np.median(f0))
+            q1, q3 = (float(v) for v in np.percentile(f0, [25, 75]))
+            spread_st = float(12 * np.log2(q3 / max(q1, 1e-9)))
 
     bands = {"sub_85": float((f0 < MALE_MIN).mean()),
              "male": float(((f0 >= MALE_MIN) & (f0 < MALE_MAX)).mean()),
@@ -165,6 +194,7 @@ def register(path, hop_div=2):
     return _row(register=reg, f0_hz=round(med, 1), q1_hz=round(q1, 1), q3_hz=round(q3, 1),
                 spread_st=round(spread_st, 2), lead_hz=round(lead_hz, 1),
                 lead_frac=round(lead_frac, 3), oct_up_frac=round(oct_up_frac, 3),
+                folded_frac=round(folded_frac, 3),
                 voiced_s=round(len(f0) * 512 * hop_div / 44100, 1), frames=int(len(f0)),
                 bands={k: round(v, 3) for k, v in bands.items()})
 
@@ -234,61 +264,97 @@ def tempo(x, sr):
     return {"bpm": round(60.0/(best*hop/sr),2)}
 
 
-def continuity(path, drop_db=20.0, min_run_s=0.4, edge_s=3.0):
-    """Does the arrangement ever STOP? Every other audio gate here is a whole-track scalar.
+def continuity(path, drop_db=20.0, min_hole_s=0.8, edge_s=3.0, local_s=10.0, tail_cap_s=15.0):
+    """Does the arrangement ever STOP — judged against the LOCAL musical context, not the loudest
+    moment of the whole track.
 
-    Loudness, dynamic range, true peak, clipping and word accuracy are all satisfied by a track
-    with holes punched in it — they average over the time axis, and a hole is a small part of an
-    average. The record that shipped had SEVEN of them, 9.8 s in total, four inside the first
-    eighteen seconds at roughly 4.7 s spacing, and it passed every gate the notebook had.
+    The first version compared every frame with the global 95th percentile, and that one reference
+    condemned three kinds of silence that are music, all found by running it on real takes:
 
-    Three sibling seeds showed holes at the same timestamps, so it is not seed noise: with no
-    wordless section anywhere in the lyric, the model manufactured its own intro space by cutting
-    the track. The rebuilt lyric gives it real instrumental blocks instead.
+      * a SPARSE INTRO — "a lone anvil struck slow, no drums" leaves 1-2 s between strikes, all of
+        it 20 dB under the chorus. Those gaps are the fabric of the section, not holes in it.
+      * the COMMISSIONED FADE — [Instrumental fades out] decays through the threshold long before
+        the 3 s edge exemption begins, so the ending it was asked for read as failure.
+      * a QUIET BRIDGE — "drums out, one voice" sits far below the wall the chorus builds.
 
-    A frame counts as dropped when it sits `drop_db` below the track's OWN 95th-percentile frame
-    level — relative, so a quiet mix is not condemned for being quiet. Head and tail are ignored:
-    a fade is not a dropout.
+    The musical question is LOCAL: a sudden hole in a dense section is a glitch; the same second
+    of quiet in a section that is quiet everywhere is the arrangement. So every frame is judged
+    against the median level of its surrounding `local_s` seconds, and a hole must now be
+    `min_hole_s` of continuous silence against THAT — long enough that no anvil strike, beat gap
+    or breath reads as one.
+
+    Two global guards stay, because local judgment alone can be gamed by a track that dies:
+      * the trailing quiet is exempt only up to `tail_cap_s` — a fade is short; a track that
+        stops at 90 s and coasts is 75 s of dropout, not a long outro;
+      * `alive_frac` reports how much of the track holds within 12 dB of its loud reference —
+        a file of near-silence has nothing for the local judge to condemn, so the floor on
+        SOMETHING being there has to be global.
+
+    The take that forced the redesign still fails under it (seven mid-section holes in a dense
+    mix), and the take that exposed it passes — see the selftest.
     """
     x, sr = load(path, mono=True)
     hop = max(1, int(0.046 * sr))
     nf = len(x) // hop
-    if nf < 10:
+    if nf < 40:
         return {"dropouts": 0, "dropout_s": 0.0, "longest_dropout_s": 0.0,
-                "longest_loud_run_s": round(len(x) / sr, 1), "at": []}
+                "alive_frac": 1.0, "at": []}
     rms = np.sqrt((x[:nf * hop].reshape(nf, hop) ** 2).mean(1))
     db = 20 * np.log10(np.maximum(rms, 1e-12))
-    quiet = db < (np.percentile(db, 95) - drop_db)
-    inner = quiet.copy()
-    e = min(nf // 2, int(edge_s * sr / hop))
-    inner[:e] = False
-    inner[nf - e:] = False
+    spf = hop / sr                                    # seconds per frame
+    ref = np.percentile(db, 95)
+
+    # The local reference: a running median over the surrounding window, computed on the frames
+    # that are not already near-silent so one hole does not drag its own reference down with it.
+    w = max(3, int(local_s / spf))
+    half = w // 2
+    local = np.empty(nf)
+    audible = db > (ref - 45)
+    for i in range(nf):
+        a, b = max(0, i - half), min(nf, i + half)
+        seg = db[a:b][audible[a:b]]
+        local[i] = np.median(seg) if len(seg) else ref - 45
+
+    quiet = db < np.minimum(local, ref) - drop_db
+
+    # Head and tail: the first/last edge_s never count, and the trailing quiet suffix (the fade,
+    # or the natural ring-out) is exempt up to tail_cap_s.
+    e = min(nf // 4, int(edge_s / spf))
+    quiet[:e] = False
+    quiet[nf - e:] = False
+    tail = 0
+    for i in range(nf - e - 1, -1, -1):
+        if quiet[i]:
+            tail += 1
+        else:
+            break
+    tail = min(tail, int(tail_cap_s / spf))
+    if tail:
+        quiet[nf - e - tail: nf - e] = False
+
     runs, at, i = [], [], 0
+    need = int(min_hole_s / spf)
     while i < nf:
-        if inner[i]:
+        if quiet[i]:
             j = i
-            while j < nf and inner[j]:
+            while j < nf and quiet[j]:
                 j += 1
-            if (j - i) * hop / sr >= min_run_s:
-                runs.append((j - i) * hop / sr)
-                at.append(round(i * hop / sr, 2))
+            if j - i >= need:
+                runs.append((j - i) * spf)
+                at.append(round(i * spf, 2))
             i = j
         else:
             i += 1
-    best = cur = 0
-    for v in ~quiet:
-        cur = cur + 1 if v else 0
-        best = max(best, cur)
+    alive = float(np.mean(db > ref - 12))
     return {"dropouts": len(runs), "dropout_s": round(float(sum(runs)), 2),
             "longest_dropout_s": round(float(max(runs, default=0.0)), 2),
-            "longest_loud_run_s": round(best * hop / sr, 1), "at": at[:10]}
+            "alive_frac": round(alive, 3), "at": at[:10]}
 
 
-# Calibrated against this pipeline's own corpus, with the headroom stated. The take under review
-# scored 7 dropouts / 9.80 s / 10.4 s longest run and fails all three. The tightest PASSING record
-# is the conditioning reference at 4.23 s of dropout (30% headroom) and STEEL v1 at an 18.9 s
-# longest run (18% headroom) — a bar set nearer than that to a known-good record fires eventually.
-CONTINUITY = {"dropout_s_max": 6.0, "dropouts_max": 5, "longest_loud_run_s_min": 16.0}
+# Calibrated on this pipeline's own takes: the seven-hole record scores 5+ holes / 7+ s under the
+# local judge and fails with margin; the sparse-intro take it wrongly condemned scores zero.
+# alive_frac floors the global guard: every real record here holds 0.25+; near-silence cannot.
+CONTINUITY = {"dropout_s_max": 3.0, "dropouts_max": 3, "alive_frac_min": 0.15}
 
 
 def continuity_verdict(c):
@@ -299,9 +365,9 @@ def continuity_verdict(c):
     if c["dropouts"] > CONTINUITY["dropouts_max"]:
         out.append(f"{c['dropouts']} separate holes in the track — limit "
                    f"{CONTINUITY['dropouts_max']}")
-    if c["longest_loud_run_s"] < CONTINUITY["longest_loud_run_s_min"]:
-        out.append(f"never plays for more than {c['longest_loud_run_s']}s unbroken — floor "
-                   f"{CONTINUITY['longest_loud_run_s_min']}s")
+    if c["alive_frac"] < CONTINUITY["alive_frac_min"]:
+        out.append(f"only {int(c['alive_frac'] * 100)}% of the track is within 12 dB of its own "
+                   f"loud reference — the file is mostly silence")
     return out
 
 
@@ -396,6 +462,58 @@ def selftest():
         good = abs(L["peak_dbfs"]+1.0) < 0.2 and L["clipped"] == 0; ok &= good
         print(f"   peak {L['peak_dbfs']:+.2f} dBFS (want -1.00), clipped {L['clipped']}  "
               f"{'ok' if good else 'FAIL'}  LRA={L['lra_lu']}")
+    # ── REGISTER: the octave fold, and the guard that keeps it from folding a woman ──
+    print("\nREGISTER FOLD — a chant choir an octave above a male lead is not a female voice")
+    rng = np.random.default_rng(7)
+    st = lambda c, n, s_=0.4: c * 2 ** (rng.normal(0, s_, n) / 12)
+    choir = np.concatenate([st(110, 600), st(220, 280), st(150, 120, 1.0)])
+    r = classify_f0(choir)
+    good = r["register"] == "male" and r["folded_frac"] > 0.15
+    ok &= good
+    print(f"   male 110Hz + octave choir  -> {r['register']} (folded {r['folded_frac']})  "
+          f"{'ok' if good else 'FAIL'}")
+    fem = np.concatenate([st(225, 850, 0.6), st(90, 90), st(160, 60, 1.0)])
+    r2 = classify_f0(fem)
+    good2 = r2["register"] == "female" and (r2["folded_frac"] or 0) == 0
+    ok &= good2
+    print(f"   female 225Hz + 9% bleed    -> {r2['register']} (folded {r2['folded_frac']})  "
+          f"{'ok' if good2 else 'FAIL — the guard folded a woman'}")
+
+    # ── CONTINUITY: judged against LOCAL context, with the takes that forced the design ──
+    print("\nCONTINUITY — a hole in a dense mix is a glitch; the same quiet in a sparse intro is music")
+    sr2 = 22050
+    tt = np.arange(int(sr2 * 60)) / sr2
+    dense = 0.4 * np.sin(2 * np.pi * 180 * tt) * (1 + 0.3 * np.sin(2 * np.pi * 2 * tt))
+    dense = dense + 0.05 * rng.normal(size=len(tt))
+    holed = dense.copy()
+    for at in (12.0, 25.0, 40.0):                       # three 1.2 s dead stops mid-mix
+        holed[int(at * sr2):int((at + 1.2) * sr2)] *= 0.001
+    hit = 0.5 * np.sin(2 * np.pi * 700 * tt[:int(0.12 * sr2)]) * np.exp(-tt[:int(0.12 * sr2)] * 18)
+    sparse = 0.02 * rng.normal(size=len(tt))            # a sparse anvil intro for 22 s...
+    for k in range(1, 16):
+        i = int(k * 1.3 * sr2)
+        sparse[i:i + len(hit)] += hit
+    sparse[int(22 * sr2):] = dense[int(22 * sr2):]      # ...then the band enters
+    sparse[int(52 * sr2):] *= np.linspace(1, 0.001, len(sparse) - int(52 * sr2))  # the fade
+    dead = dense.copy(); dead[int(30 * sr2):] *= 0.001  # dies at 30 s, never returns
+
+    import tempfile as _tf
+    def _wav(name, x):
+        pth = Path(_tf.gettempdir()) / f"cont_{name}.wav"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "s16le", "-ar", str(sr2), "-ac", "1",
+                        "-i", "-", str(pth)],
+                       input=(np.clip(x, -1, 1) * 32767).astype("<i2").tobytes(), check=True)
+        return str(pth)
+    for name, x, want_fail in (("three dead stops mid-mix", holed, True),
+                               ("sparse anvil intro + fade", sparse, False),
+                               ("dies at 30s, silence after", dead, True)):
+        c = continuity(_wav(name.split()[0], x))
+        v = continuity_verdict(c)
+        right = bool(v) == want_fail
+        ok &= right
+        print(f"   {name:28s} holes {c['dropouts']} · {c['dropout_s']}s · alive {c['alive_frac']} -> "
+              f"{'REFUSED' if v else 'passes'}  {'ok' if right else 'FAIL'}")
+
     print(f"\n{'ALL PASSED' if ok else 'FAILURES — do not trust any report from this build'}")
     return ok
 

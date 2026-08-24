@@ -904,7 +904,25 @@ def register_gate(mp3):
 _ref = sorted(glob.glob("/kaggle/input/**/KEEPTHEKEY.mp3", recursive=True))
 MALE_REF = _ref[0] if _ref else None
 assert MALE_REF, "male reference not mounted (kernel source artafather/keep-the-key)"
-print("male reference:", MALE_REF, flush=True)
+
+# THE REFERENCE CROP IS OURS, NOT random.randint's. At the pin, handler/io_audio.py picks the
+# three 10 s conditioning windows with random.randint() and nothing in the repo ever seeds
+# `random` — so six "fixed-seed" takes were each conditioned on a DIFFERENT slice of the
+# reference, and a re-run of this notebook cannot reproduce its own candidates. Crop the same
+# three windows deterministically (head, middle, tail of the take), hash the result into the
+# manifest, and hand ACE-Step a file exactly 30 s long so its chooser has nothing left to choose.
+_r30 = TMP / "male_ref_30s.wav"
+sh(f"ffmpeg -v error -i '{MALE_REF}' -filter_complex "
+   f"'[0]atrim=0:10,asetpts=PTS-STARTPTS[a];[0]atrim=85:95,asetpts=PTS-STARTPTS[b];"
+   f"[0]atrim=170:180,asetpts=PTS-STARTPTS[c];[a][b][c]concat=n=3:v=0:a=1' "
+   f"-ar 44100 '{_r30}' -y")
+import hashlib as _hl
+REF30_SHA = _hl.sha256(_r30.read_bytes()).hexdigest()[:20]
+_d30 = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                             "-of", "csv=p=0", str(_r30)], capture_output=True, text=True).stdout.strip())
+assert 29.0 <= _d30 <= 31.0, f"reference crop is {_d30}s, not 30 — the source take is shorter than 180s?"
+MALE_REF = str(_r30)
+print(f"male reference: {MALE_REF} · 30s deterministic crop · sha {REF30_SHA}", flush=True)
 clock("instruments proven")
 
 # %% [markdown]
@@ -1259,6 +1277,7 @@ if rep.get("seconds") and abs(rep["seconds"] - DURATION) > 5:
 # lyric through the same pipeline, and record-final carries 9.8 s of holes while record-v2 carries
 # none — the difference is downstream of the take, and the master arm is chosen by word accuracy
 # alone against a reference that itself has 4.2 s of dropout. Mastering can import silence.
+verify["reference_crop_sha"] = REF30_SHA
 _cont = M.continuity(str(mp3)); verify["continuity"] = _cont
 problems += M.continuity_verdict(_cont)
 # THE COVER, JUDGED INSIDE THE SUBJECT'S OWN MASK. What used to be here were four whole-frame
