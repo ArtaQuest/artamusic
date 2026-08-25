@@ -105,8 +105,10 @@ def register(path, hop_div=2):
     """
     import demucs.separate
     with tempfile.TemporaryDirectory() as td:
+        # --shifts 0 — the default applies one random, unseeded time shift per separation, so the
+        # same file yields a different stem on every call and the register wobbles with it.
         demucs.separate.main(shlex.split(
-            f'--two-stems vocals -n htdemucs --device cpu -o "{td}" "{path}"'))
+            f'--two-stems vocals -n htdemucs --shifts 0 --device cpu -o "{td}" "{path}"'))
         voc = next(Path(td).rglob("vocals.wav"), None)
         if voc is None:
             return _row(register="no-vocal-stem")

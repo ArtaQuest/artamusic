@@ -851,7 +851,12 @@ def _vocal_stem(mp3):
     """One separation, shared by register and words — the stem is where the voice is."""
     import demucs.separate, shlex, tempfile as _tf
     td = _tf.mkdtemp()
-    demucs.separate.main(shlex.split(f'--two-stems vocals -n htdemucs --device cpu -o "{td}" "{mp3}"'))
+    # --shifts 0: the default is ONE RANDOM, UNSEEDED time shift per separation, so every call
+    # yields a different stem and every number downstream of the stem wobbles with it. Measured on
+    # one delivered master: the same bytes scored 85.2% at arm selection and 76.3% at verify —
+    # nine points of pure separation noise, which the old mastering-cost rule then attributed to
+    # the master. A judge's input must be a function of the audio, nothing else.
+    demucs.separate.main(shlex.split(f'--two-stems vocals -n htdemucs --shifts 0 --device cpu -o "{td}" "{mp3}"'))
     src = next(Path(td).rglob("vocals.wav"), None)
     if src is None:
         return None
@@ -862,9 +867,15 @@ def _vocal_stem(mp3):
 def word_accuracy(mp3, lyric_text, stem=None):
     # transcribe the SEPARATED STEM, chunked at quiet points into ~20 s segments (ICME-2025 recipe)
     target = stem or mp3
+    # temperature=0.0 — belt only. The 8.9-point same-bytes swing that exposed the noisy judge
+    # was TESTED against the ladder theory and the theory lost: three transcriptions of one stem
+    # scored identically to the decimal, ladder or no ladder. The random stage was the SEPARATION
+    # (demucs' unseeded --shifts, fixed at the _vocal_stem call). temperature=0.0 stays because a
+    # judge should not carry a sampling path at all, but it is hygiene, not the fix.
     segs, _ = asr().transcribe(str(target), beam_size=5, vad_filter=True,
                                vad_parameters=dict(min_silence_duration_ms=400),
-                               chunk_length=20, condition_on_previous_text=False)
+                               chunk_length=20, condition_on_previous_text=False,
+                               temperature=0.0)
     hyp = re.findall(r"[a-z']+", " ".join(s.text for s in segs).lower())
     asr_release()
     ref = re.findall(r"[a-z']+", re.sub(r"\[[^\]]*\]", " ", lyric_text.lower()))
@@ -1215,12 +1226,22 @@ for name, files in arms.items():
     scores[name] = {"words": round(word_accuracy(files["mp3"], LYRICS, stem=st), 3)}
     print(f"master arm {name}: words {scores[name]['words']*100:.1f}%", flush=True)
 best_arm = max(arms, key=lambda k: scores[k]["words"])
-print(f"master choice by measurement: {best_arm}", flush=True)
+# THE MASTERING-COST VERDICT BELONGS HERE, where the winner and the arm were measured minutes
+# apart by the same judge — not in the final verify against a number from another session. The
+# old rule compared the take's score with a fresh measurement of the master and read judge noise
+# as mastering damage: "mastering cost 10.7 points" on an arm whose own measurement, on the very
+# bytes shipped, sat 1.8 points under the take.
+MASTER_COST = round(float(WINNER_ACC - scores[best_arm]["words"]), 3) if WINNER_ACC else 0.0
+assert MASTER_COST <= 0.05, (
+    f"mastering cost {MASTER_COST*100:.1f} points of intelligibility "
+    f"({WINNER_ACC*100:.1f}% -> {scores[best_arm]['words']*100:.1f}%) — refusing to ship a master "
+    "that damaged the take; both arms are written to out/ for the autopsy")
+print(f"master choice by measurement: {best_arm} · cost {MASTER_COST*100:.1f} pts", flush=True)
 shutil.copy(arms[best_arm]["wav"], wav); shutil.copy(arms[best_arm]["mp3"], mp3)
 (WORK / "master.json").write_text(json.dumps({"arm_chosen": best_arm, "arm_scores": scores,
                                               "iterations": master_iters}, indent=2))
-for f in ("_direct.wav", "_direct.mp3", "_matched.wav", "_matched.mp3"):
-    (OUT / f).unlink(missing_ok=True)
+for f in ("_direct.wav", "_matched.wav"):
+    (OUT / f).unlink(missing_ok=True)   # the mp3 arms stay — they are the autopsy when a gate fires
 clock("mastered")
 
 # ── the cover video: the loop under the whole song ───────────────────────────────────────
@@ -1265,8 +1286,15 @@ verify.update(register=reg, word_accuracy=round(acc, 3), asr_judge=_WH[1], wav=L
 problems = []
 if not ok_reg: problems.append(f"register on the DELIVERED master is {reg.get('register')}")
 if acc < 0.75: problems.append(f"word accuracy {acc*100:.1f}% under the 75% floor")
-if WINNER_ACC is not None and acc < WINNER_ACC - 0.03:
-    problems.append(f"mastering cost {100*(WINNER_ACC-acc):.1f} points of intelligibility")
+# The same bytes were scored at arm selection; a fresh score that disagrees is JUDGE DRIFT,
+# not mastering (nothing touched the file in between — the delivered mp3 is a copy of the arm).
+_arm_words = scores[best_arm]["words"]
+verify["master_cost_pts"] = round(100 * (MASTER_COST or 0), 1)
+verify["judge_drift_pts"] = round(100 * (_arm_words - acc), 1)
+if abs(_arm_words - acc) > 0.04:
+    problems.append(f"the judge cannot repeat its own measurement on identical bytes "
+                    f"({_arm_words*100:.1f}% then {acc*100:.1f}%) — no verdict that depends on "
+                    "it can be trusted")
 for tag, L in (("wav", Lw), ("mp3", Lm)):
     if L.get("clipped"): problems.append(f"{tag} has {L['clipped']} clipped samples")
 tp = Lm.get("true_peak_dbtp")
