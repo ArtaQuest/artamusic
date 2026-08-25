@@ -848,9 +848,24 @@ def asr_release():
     gc.collect(); torch.cuda.empty_cache()
 
 def _vocal_stem(mp3):
-    """One separation, shared by register and words — the stem is where the voice is."""
+    """One separation, shared by register and words — the stem is where the voice is.
+
+    THE INPUT IS LEVEL-NORMALISED FIRST, because the judge is level-sensitive: demucs separates a
+    hotter mix measurably worse, and the stem loss reads as intelligibility loss. Measured on one
+    take mastered to different loudnesses, same content throughout: -11.7 LUFS scored 85.8%,
+    -10.1 scored 76.9%, -14 scored 91.7% — roughly three points per dB, dwarfing anything the
+    mastering itself did (attenuating the -10 master back by 1.6 dB recovered 6.5 of its 8.9
+    "lost" points). A judge that scores the level cannot judge the content, so every file it
+    hears is brought to -14 LUFS by PURE GAIN first — a linear volume change, no dynamics, no
+    content edit — making word accuracy a function of the words again.
+    """
     import demucs.separate, shlex, tempfile as _tf
     td = _tf.mkdtemp()
+    L = M.loudness(str(mp3))
+    g = -14.0 - (L.get("lufs") if L.get("lufs") is not None else -14.0)
+    norm = Path(_tf.mkdtemp()) / "norm.wav"
+    sh(f"ffmpeg -v error -i '{mp3}' -af volume={g:.2f}dB -ar 44100 '{norm}' -y", quiet=True)
+    mp3 = norm
     # --shifts 0: the default is ONE RANDOM, UNSEEDED time shift per separation, so every call
     # yields a different stem and every number downstream of the stem wobbles with it. Measured on
     # one delivered master: the same bytes scored 85.2% at arm selection and 76.3% at verify —
@@ -1181,14 +1196,14 @@ clock("song chosen")
 # **word accuracy** survives better ships; the choice is recorded.
 
 # ── master: static gain, oversampled limiter, measure-then-correct; the arm chosen by words ──
-TARGET_LUFS, TARGET_TP = -10.0, -1.0
+TARGET_TP = -1.0   # loudness target comes from the LADDER below, chosen by measurement
 wav, mp3 = OUT / "STEEL.wav", OUT / "STEEL.mp3"
 
-def finish(src, wav_out, mp3_out):
+def finish(src, wav_out, mp3_out, target_lufs):
     ceiling, iters = TARGET_TP, []
     for it in range(3):
         a = M.loudness(src)
-        g = TARGET_LUFS - (a["lufs"] if a["lufs"] is not None else -14.0)
+        g = target_lufs - (a["lufs"] if a["lufs"] is not None else -14.0)
         lim = 10 ** (ceiling / 20)
         af = (f"volume={g:.2f}dB,aresample=176400,"
               f"alimiter=limit={lim:.5f}:level=disabled,aresample=44100")
@@ -1203,45 +1218,38 @@ def finish(src, wav_out, mp3_out):
         ceiling -= (tp - TARGET_TP) + 0.1
     return iters
 
-MATCH_IN = None
-try:
-    import matchering as mg
-    sh(f"ffmpeg -v error -i '{WINNER}' -ar 44100 /tmp/_target.wav -y", quiet=True)
-    sh(f"ffmpeg -v error -i '{MALE_REF}' -ar 44100 /tmp/_ref.wav -y", quiet=True)
-    mg.process(target="/tmp/_target.wav", reference="/tmp/_ref.wav",
-               results=[mg.Result("/tmp/_matched.wav", "FLOAT", use_limiter=False, normalize=False)])
-    MATCH_IN = "/tmp/_matched.wav"
-except Exception as e:
-    print(f"matchering unavailable ({str(e)[:80]}) — direct master only", flush=True)
-
-arms, master_iters = {}, {}
-master_iters["direct"] = finish(str(WINNER), str(OUT / "_direct.wav"), str(OUT / "_direct.mp3"))
-arms["direct"] = {"wav": str(OUT / "_direct.wav"), "mp3": str(OUT / "_direct.mp3")}
-if MATCH_IN:
-    master_iters["matched"] = finish(MATCH_IN, str(OUT / "_matched.wav"), str(OUT / "_matched.mp3"))
-    arms["matched"] = {"wav": str(OUT / "_matched.wav"), "mp3": str(OUT / "_matched.mp3")}
-scores = {}
-for name, files in arms.items():
-    st = _vocal_stem(files["mp3"])
-    scores[name] = {"words": round(word_accuracy(files["mp3"], LYRICS, stem=st), 3)}
-    print(f"master arm {name}: words {scores[name]['words']*100:.1f}%", flush=True)
-best_arm = max(arms, key=lambda k: scores[k]["words"])
-# THE MASTERING-COST VERDICT BELONGS HERE, where the winner and the arm were measured minutes
-# apart by the same judge — not in the final verify against a number from another session. The
-# old rule compared the take's score with a fresh measurement of the master and read judge noise
-# as mastering damage: "mastering cost 10.7 points" on an arm whose own measurement, on the very
-# bytes shipped, sat 1.8 points under the take.
+# MATCHERING IS GONE, on two deterministic measurements: EQ-matching this sparse chant toward the
+# dense reference cost 11.3 and then 14.8 points of level-normalised intelligibility. A reference
+# matcher assumes the target WANTS the reference's spectrum; a lone anvil in a stone room does not
+# want KEEPTHEKEY's wall. The master is the take, gained to a target and true-peak limited —
+# nothing else — and the TARGET IS CHOSEN BY MEASUREMENT from a short ladder: the loudest target
+# whose cost, judged level-invariantly, stays within noise. With the judge normalised, cost now
+# means CONTENT damage (what the limiter chewed), not level.
+LADDER = [-10.0, -12.0]
+arms, master_iters, scores = {}, {}, {}
+for tgt in LADDER:
+    name = f"direct{int(tgt)}"
+    master_iters[name] = finish(str(WINNER), str(OUT / f"_{name}.wav"), str(OUT / f"_{name}.mp3"), tgt)
+    arms[name] = {"wav": str(OUT / f"_{name}.wav"), "mp3": str(OUT / f"_{name}.mp3"), "target": tgt}
+    st = _vocal_stem(arms[name]["mp3"])
+    w = round(word_accuracy(arms[name]["mp3"], LYRICS, stem=st), 3)
+    scores[name] = {"words": w, "cost_pts": round(100 * (WINNER_ACC - w), 1) if WINNER_ACC else 0.0}
+    print(f"master {name}: words {scores[name]['words']*100:.1f}% · cost {scores[name]['cost_pts']} pts", flush=True)
+# the LOUDEST target within 3 points wins; otherwise the least-damaging one faces the 5-point gate
+_ok = [n for n in scores if scores[n]["cost_pts"] <= 3.0]
+best_arm = (max(_ok, key=lambda n: arms[n]["target"]) if _ok
+            else max(scores, key=lambda n: scores[n]["words"]))
 MASTER_COST = round(float(WINNER_ACC - scores[best_arm]["words"]), 3) if WINNER_ACC else 0.0
 assert MASTER_COST <= 0.05, (
-    f"mastering cost {MASTER_COST*100:.1f} points of intelligibility "
-    f"({WINNER_ACC*100:.1f}% -> {scores[best_arm]['words']*100:.1f}%) — refusing to ship a master "
-    "that damaged the take; both arms are written to out/ for the autopsy")
+    f"mastering cost {MASTER_COST*100:.1f} points of level-normalised intelligibility "
+    f"({WINNER_ACC*100:.1f}% -> {scores[best_arm]['words']*100:.1f}%) at every ladder target — "
+    "refusing to ship a master that damaged the take; the ladder mp3s are in out/ for the autopsy")
 print(f"master choice by measurement: {best_arm} · cost {MASTER_COST*100:.1f} pts", flush=True)
 shutil.copy(arms[best_arm]["wav"], wav); shutil.copy(arms[best_arm]["mp3"], mp3)
 (WORK / "master.json").write_text(json.dumps({"arm_chosen": best_arm, "arm_scores": scores,
                                               "iterations": master_iters}, indent=2))
-for f in ("_direct.wav", "_matched.wav"):
-    (OUT / f).unlink(missing_ok=True)   # the mp3 arms stay — they are the autopsy when a gate fires
+for n in arms:
+    (OUT / f"_{n}.wav").unlink(missing_ok=True)   # the mp3s stay — they are the autopsy if a gate fires
 clock("mastered")
 
 # ── the cover video: the loop under the whole song ───────────────────────────────────────
