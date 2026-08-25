@@ -43,7 +43,7 @@ T_START = time.time()
 PINS = {
     "ace_step_code": "6d467e4b5081ccb0abf1ec1bf4fdf9051a2d34b0",   # github.com/ACE-Step/ACE-Step-1.5
     "song_model": "acestep-v15-xl-sft",
-    "measure_sha": "5d412725d82cf8e6b79c7f3e785945940628ce8b",      # ArtaQuest/artamusic lib/measure.py
+    "measure_sha": "6770ef101f2f86355dd8e5d611a26416cb79906f",      # ArtaQuest/artamusic lib/measure.py
     "lyric_profile_sha": "ebee5bf324d8a6cff22ba666825a777c7dfc5c39",  # ArtaQuest/artamusic lib/lyric_profile.py
     "lyric_sha": "6b048ce9e284a4b5017943b532c3084d59ae35a2",
     "shot_sha": "f8ec81cddd037b729df93d48b7b0c83ab5d14f64",   # ArtaQuest/artamusic song/shot_lego.json
