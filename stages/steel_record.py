@@ -123,7 +123,7 @@ sh("pip install -q 'demucs>=4.0.1' faster-whisper==1.2.1 hf_transfer toml python
    "'safetensors>=0.7.0' 'transformers>=4.51.0,<4.58.0' diffusers==0.39.0 "
    "'torchao>=0.16.0' peft "
    "vector-quantize-pytorch 'gguf>=0.10.0' ftfy sentencepiece protobuf imageio imageio-ffmpeg "
-   "matchering 2>&1 | tail -2")
+   "2>&1 | tail -2")
 if PASCAL:
     sh(f"pip install -q torch=={PINS['torch_pascal']} torchvision==0.22.1 torchaudio=={PINS['torch_pascal']} "
        f"--index-url https://download.pytorch.org/whl/{PINS['cuda_line_pascal']} 2>&1 | tail -2")
@@ -1191,11 +1191,11 @@ clock("song chosen")
 # Static gain to −10 LUFS, then a 4×‑oversampled true‑peak limiter at −1 dBTP, then
 # **measure the encoded mp3 and correct** (LAME overshoots; a target you never re‑measure is how a
 # record ships at −0.8 dBTP against a −1.0 promise). Never `loudnorm`'s second pass: it silently
-# discards `linear=true` when the target is unreachable and rides gain instead. Two masters are
-# made — direct, and tonally matched to the reference with matchering — and the one whose
-# **word accuracy** survives better ships; the choice is recorded.
+# discards `linear=true` when the target is unreachable and rides gain instead. The master is the
+# take, gained and true-peak limited, nothing else; its loudness target is chosen from a short
+# ladder by the level-invariant judge, and the choice is recorded with its measured cost.
 
-# ── master: static gain, oversampled limiter, measure-then-correct; the arm chosen by words ──
+# ── master: static gain, oversampled limiter, measure-then-correct; the target chosen by words ──
 TARGET_TP = -1.0   # loudness target comes from the LADDER below, chosen by measurement
 wav, mp3 = OUT / "STEEL.wav", OUT / "STEEL.mp3"
 
