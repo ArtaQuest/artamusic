@@ -45,7 +45,7 @@ PINS = {
     "song_model": "acestep-v15-xl-sft",
     "measure_sha": "6770ef101f2f86355dd8e5d611a26416cb79906f",      # ArtaQuest/artamusic lib/measure.py
     "lyric_profile_sha": "ebee5bf324d8a6cff22ba666825a777c7dfc5c39",  # ArtaQuest/artamusic lib/lyric_profile.py
-    "lyric_sha": "6b048ce9e284a4b5017943b532c3084d59ae35a2",
+    "lyric_sha": "a0f955ece53555c055ce6f081ce0fa418cab616d",
     "shot_sha": "f8ec81cddd037b729df93d48b7b0c83ab5d14f64",   # ArtaQuest/artamusic song/shot_lego.json
     "lego_lora": ("Remade-AI/Lego", "3f7938015b2537238f9e4f17b8896ddceac9cbe7"),
     "lora_file": "lego_35_epochs.safetensors",
