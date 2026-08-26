@@ -121,7 +121,7 @@ if not REPO.exists():
 sh("pip install -q 'demucs>=4.0.1' faster-whisper==1.2.1 hf_transfer toml python-dotenv modelscope "
    "diskcache py3langid pyloudnorm ffmpeg-python soundfile loguru einops accelerate numba scipy "
    "'safetensors>=0.7.0' 'transformers>=4.51.0,<4.58.0' diffusers==0.39.0 "
-   "'torchao>=0.16.0' peft "
+   "'torchao>=0.16.0' peft audiobox_aesthetics torchcodec "
    "vector-quantize-pytorch 'gguf>=0.10.0' ftfy sentencepiece protobuf imageio imageio-ffmpeg "
    "2>&1 | tail -2")
 if PASCAL:
@@ -277,7 +277,8 @@ assert not fit_bad, "the lyric does not fit the clock: " + "; ".join(fit_bad)
 # because they already arrive on a stronger channel as their own metas block.
 CAPTION = ("Dark chant anthem that builds. Opens on a lone anvil struck slow in a big stone room "
            "and one far war horn, no drums. War drums enter and the verses stay lean: a deep "
-           "gravelly male lead over drums and a low drone, space between the lines. The chorus "
+           "gravelly male lead riding full war drums and a low drone that never stop — the space "
+           "sits between his lines, never in the band. The chorus "
            "opens out into a massive unison male chant choir answering the lead, horns and low "
            "strings behind it. The bridge drops to one voice and one struck anvil, drums out. The "
            "last chorus returns bigger, then the drums stop and the anvil rings out alone. "
@@ -1108,10 +1109,44 @@ for seed, strength in CANDIDATES:
         passers.append((acc, -float(reg.get("spread_st") or 99), mp3, seed))
     clock(f"{name} gated")
 
-WINNER, WINNER_ACC, WINNER_SEED = None, None, None
+# THE WINNER IS THE TAKE PEOPLE WOULD RATHER HEAR, not the one a transcriber parses best. v6
+# picked its winner by word accuracy alone and shipped CE 6.58 while a take scoring CE 6.90 sat
+# PASSED and discarded in the same pool — words measure intelligibility, and intelligibility is a
+# floor, not the objective. Every passer already clears that floor (75%), register and continuity;
+# among them, Meta's audiobox-aesthetics CE (content enjoyment, 1..10, trained on human ratings)
+# decides. Scored on 10 s windows averaged — the model's own regime; a whole track at once asks
+# a conv for a 12 GiB buffer.
+def aesthetics(path):
+    global _AB
+    if "_AB" not in globals():
+        from audiobox_aesthetics.infer import initialize_predictor
+        _AB = initialize_predictor()
+    import tempfile as _tf
+    td = _tf.mkdtemp()
+    chunks = []
+    for k in range(int(DURATION // 10)):
+        cp = f"{td}/{k}.wav"
+        r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", str(k * 10), "-t", "10",
+                            "-i", str(path), "-ac", "1", "-ar", "16000", cp], capture_output=True)
+        if r.returncode == 0 and Path(cp).exists() and Path(cp).stat().st_size > 32000:
+            chunks.append(cp)
+    rows = _AB.forward([{"path": c} for c in chunks])
+    return {ax: round(float(np.mean([r[ax] for r in rows])), 2) for ax in ("CE", "CU", "PC", "PQ")}
+
+WINNER, WINNER_ACC, WINNER_SEED, WINNER_AES = None, None, None, None
 if passers:
-    passers.sort(reverse=True)
-    WINNER_ACC, _, WINNER, WINNER_SEED = passers[0]
+    scored_p = []
+    for acc_, spread_, mp3_, seed_ in passers:
+        aes = aesthetics(mp3_)
+        for row_ in gate_log:
+            if row_.get("seed") == seed_:
+                row_["aesthetics"] = aes
+        print(f"  cand{seed_}: CE {aes['CE']} · PQ {aes['PQ']} · words {acc_*100:.1f}%", flush=True)
+        scored_p.append((aes["CE"], acc_, mp3_, seed_, aes))
+    (WORK / "gate.json").write_text(json.dumps(gate_log, indent=2))
+    scored_p.sort(reverse=True)
+    _ce, WINNER_ACC, WINNER, WINNER_SEED, WINNER_AES = scored_p[0]
+    print(f"WINNER by enjoyment: seed {WINNER_SEED} · CE {_ce} · words {WINNER_ACC*100:.1f}%", flush=True)
     for r in gate_log:
         if r.get("seed") == WINNER_SEED and r.get("verdict") == "PASS":
             r["verdict"] = "ACCEPTED — best words of the passers"
@@ -1314,6 +1349,14 @@ if rep.get("seconds") and abs(rep["seconds"] - DURATION) > 5:
 # none — the difference is downstream of the take, and the master arm is chosen by word accuracy
 # alone against a reference that itself has 4.2 s of dropout. Mastering can import silence.
 verify["reference_crop_sha"] = REF30_SHA
+# AND THE SHIPPED FILE IS SCORED FOR ENJOYMENT, with a floor calibrated on this pipeline's own
+# corpus: reference 7.04, the take the operator called crap 6.58, the worst take ever produced
+# 5.53. The floor sits at 6.3 — below every take that was ever even a candidate to ship, so it
+# refuses only a genuine collapse; the target is the reference, and the gap to it is reported.
+verify["aesthetics"] = aesthetics(str(mp3))
+if verify["aesthetics"]["CE"] < 6.3:
+    problems.append(f"content enjoyment {verify['aesthetics']['CE']} is below 6.3 — the record "
+                    "reads as unpleasant to the aesthetic judge, whatever the other gates say")
 _cont = M.continuity(str(mp3)); verify["continuity"] = _cont
 problems += M.continuity_verdict(_cont)
 # THE COVER, JUDGED INSIDE THE SUBJECT'S OWN MASK. What used to be here were four whole-frame
