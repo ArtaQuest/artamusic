@@ -107,8 +107,8 @@ CONT_BLOCK = ("" if SONG_CONT is None else (
     'continuity gate:</b> ' + "; ".join(SONG_CONT_BAD) + '. This take is withdrawn — a corrected '
     'record is generating now.</p>' if SONG_CONT_BAD else
     f'<p class="prose"><b>Continuity:</b> the arrangement never stops — '
-    f'{SONG_CONT["dropouts"]} dropouts, longest unbroken run '
-    f'{SONG_CONT["longest_loud_run_s"]}s.</p>'))
+    f'{SONG_CONT["dropouts"]} dropouts against its own local context, '
+    f'{int(SONG_CONT["alive_frac"]*100)}% of the track within 12 dB of its loud reference.</p>'))
 
 SONG_BLOCK = ("" if not SONG else f"""
   <h2>The song</h2>
