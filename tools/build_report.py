@@ -85,7 +85,8 @@ if _lp:
 P = json.loads((RUN / "prompt.json").read_text()) if (RUN / "prompt.json").exists() else {}
 CYC = V.get("cycle") or {}
 LORA = V.get("lora_applied")
-loop_uri = uri(pick(RUN, "STEEL_cover_loop.webm"))
+_lv = pick(RUN, "STEEL_cover_loop.webm") or pick(RUN, "STEEL_cover_loop_1080.webm") or pick(RUN, "STEEL_cover_loop.mp4")
+loop_uri = uri(_lv)   # one of the three always exists in a finished run; the fetch dir may hold only the 1080
 sheet = wide(pick(RUN, "loop_sheet.jpg"))
 seam_p = pick(RUN, "loop_seam.jpg")
 seam = wide(seam_p) if seam_p else None
