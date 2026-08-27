@@ -65,6 +65,15 @@ _lp = pick(RUN, "STEEL_cover_loop.mp4") or pick(RUN, "cover_loop.mp4")
 # A RECORD IS A SONG AND A COVER. Earlier runs made only a cover, so the page only ever showed one;
 # a full record that shipped its song in silence would be showing half of itself.
 _song = pick(RUN, "STEEL.mp3")
+# The page embeds a 128k copy of the song — the page is a PREVIEW, and the 320k original pushed
+# the file past 10 MB, where the artifact deploy now times out. The record itself always ships
+# the full-rate master; only this page's inline copy is lighter.
+if _song:
+    _pp = str(RUN / _song) if not str(_song).startswith("/") else str(_song)
+    _lite = Path(tempfile.mkdtemp()) / "steel_page.mp3"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", _pp, "-codec:a", "libmp3lame",
+                    "-b:a", "128k", str(_lite)], check=True)
+    _song = _lite
 SONG = uri(_song) if _song else None
 # THE SONG IS MEASURED LIKE THE LOOP: on the file this page embeds. The run under review passed
 # every gate it had while its track stopped SEVEN times — loudness, true peak and word accuracy
