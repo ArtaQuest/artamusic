@@ -46,11 +46,17 @@ T_START = time.time()
 # a heavy no-fade ending. Their pick of take 6003 (deepest voice, biggest dynamics) retired the
 # last proxy metric; its audio is now the conditioning anchor, and the deepest male lead wins
 # selection below.
+# The matrix's verdict (2026-08-28): arm D. The 4B planner produced the only take matching the
+# operator's revealed axis end to end — male-verified, the vocal buried deepest of all four arms
+# (-8.0 dB under the band), dynamics at LRA 15.3 (the scale of the take they picked), the
+# heaviest sub weight. Guidance stays at 7.5 (B's 5.5 was male too but steady at LRA 6.4 — the
+# operator chose big dynamics over steadiness when offered both). ADG lost with the base model:
+# its takes kept a high backing layer the male gate refuses.
 ARM = {
-    "model": None,          # set from the matrix: "acestep-v15-xl-sft" or "acestep-v15-xl-base"
-    "guidance": None,       # 7.5 or 5.5
-    "use_adg": None,        # True only on the base model
-    "planner_4b": None,     # True -> only the 4B structure LM is present, so it plans
+    "model": "acestep-v15-xl-sft",
+    "guidance": 7.5,
+    "use_adg": False,
+    "planner_4b": True,
 }
 
 PINS = {
