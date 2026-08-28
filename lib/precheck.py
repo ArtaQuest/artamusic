@@ -169,10 +169,17 @@ def used_before_defined(path_or_src, is_src=False):
                         note(x.id, n.lineno)
         elif isinstance(n, _a.ExceptHandler) and n.name:
             note(n.name, n.lineno)
-        elif isinstance(n, (_a.comprehension,)):
-            for x in _a.walk(n.target):
-                if isinstance(x, _a.Name):
-                    note(x.id, getattr(n.target, "lineno", 0))
+        elif isinstance(n, (_a.DictComp, _a.ListComp, _a.SetComp, _a.GeneratorExp)):
+            # A comprehension target is bound for the WHOLE expression, whatever the layout: in
+            #   {ax: f(ax)
+            #    for ax in axes}
+            # the key expression sits a line ABOVE the `for` that binds it, and noting the target
+            # at its own line flagged exactly that as used-before-defined. Note it at the line the
+            # expression STARTS, which no use inside the expression can precede.
+            for gen in n.generators:
+                for x in _a.walk(gen.target):
+                    if isinstance(x, _a.Name):
+                        note(x.id, n.lineno)
 
     bad = []
     for n in walk_module(tree):
