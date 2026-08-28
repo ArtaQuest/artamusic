@@ -33,7 +33,12 @@ os.environ.update(HF_HOME="/tmp/hf", HF_HUB_ENABLE_HF_TRANSFER="1")
 
 sh(f"git clone https://github.com/HeartMuLa/heartlib /tmp/heartlib && "
    f"cd /tmp/heartlib && git checkout {PINS['heartlib']}")
-sh(f"{sys.executable} -m pip install -q -e /tmp/heartlib hf_transfer audiobox_aesthetics torchcodec 2>&1 | tail -2")
+# NOT -e: an editable install registers its path in a .pth file that the interpreter reads at
+# STARTUP, so the running kernel that just installed it cannot import it. A normal install copies
+# the package into site-packages, importable immediately. Cost one run to learn.
+sh(f"{sys.executable} -m pip install -q /tmp/heartlib hf_transfer audiobox_aesthetics torchcodec 2>&1 | tail -2")
+import importlib, heartlib as _hl_probe   # fail HERE, in the first minute, if the import is broken
+print("heartlib import ok:", _hl_probe.__file__, flush=True)
 clock("installed")
 
 import urllib.request
