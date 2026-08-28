@@ -25,6 +25,7 @@ PINS = {
     "heartlib": "3783bdb8441f2c298b1e64c8651173aac200361c",   # github.com/HeartMuLa/heartlib
     "mula": "HeartMuLa/HeartMuLa-oss-3B-happy-new-year",
     "codec": "HeartMuLa/HeartCodec-oss-20260123",
+    "gen": "HeartMuLa/HeartMuLaGen",
     "lyric_sha": "a0f955ece53555c055ce6f081ce0fa418cab616d",  # ArtaQuest/artamusic song/lyrics_steel.txt
 }
 WORK = Path("/kaggle/working"); OUT = WORK / "out"; OUT.mkdir(parents=True, exist_ok=True)
@@ -48,17 +49,14 @@ Path("/tmp/lyrics.txt").write_text(LYRICS)
 print(LYRICS[:200], flush=True)
 
 # %%
-from huggingface_hub import snapshot_download
+from huggingface_hub import snapshot_download, hf_hub_download
 snapshot_download(PINS["mula"], local_dir="/tmp/ckpt/HeartMuLa-oss-3B")
 snapshot_download(PINS["codec"], local_dir="/tmp/ckpt/HeartCodec-oss")
-# gen_config.json + tokenizer.json belong at the ckpt ROOT per the README tree; the model snapshot
-# carries them — surface whichever copy exists.
-import shutil
+# gen_config.json + tokenizer.json live in NEITHER model repo — they ship in the separate
+# HeartMuLa/HeartMuLaGen bundle, which is exactly what the official Space downloads. Learned by
+# running: the README's ckpt tree shows them at the root and never says where they come from.
 for name in ("gen_config.json", "tokenizer.json"):
-    if not Path(f"/tmp/ckpt/{name}").exists():
-        hits = list(Path("/tmp/ckpt").rglob(name))
-        assert hits, f"{name} not found in either checkpoint"
-        shutil.copy(hits[0], f"/tmp/ckpt/{name}")
+    hf_hub_download(PINS["gen"], name, local_dir="/tmp/ckpt")
 print("ckpt tree:", sorted(p.name for p in Path("/tmp/ckpt").iterdir()), flush=True)
 clock("checkpoints down")
 
