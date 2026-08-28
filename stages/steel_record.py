@@ -40,12 +40,25 @@ os.environ.update(HF_HOME=str(TMP / "hf"), HF_HUB_ENABLE_HF_TRANSFER="1",
                   ACESTEP_GENERATION_TIMEOUT="2400")
 T_START = time.time()
 
+# ── THE FLAME CONFIGURATION — the winning arm of the improvement matrix fills these ──
+# The operator's reference (First Flame) was measured, not guessed: F# minor, 85 BPM, a long
+# ember intro, a deep half-spoken male voice under a sub-heavy band, choruses opening upward,
+# a heavy no-fade ending. Their pick of take 6003 (deepest voice, biggest dynamics) retired the
+# last proxy metric; its audio is now the conditioning anchor, and the deepest male lead wins
+# selection below.
+ARM = {
+    "model": None,          # set from the matrix: "acestep-v15-xl-sft" or "acestep-v15-xl-base"
+    "guidance": None,       # 7.5 or 5.5
+    "use_adg": None,        # True only on the base model
+    "planner_4b": None,     # True -> only the 4B structure LM is present, so it plans
+}
+
 PINS = {
     "ace_step_code": "6d467e4b5081ccb0abf1ec1bf4fdf9051a2d34b0",   # github.com/ACE-Step/ACE-Step-1.5
     "song_model": "acestep-v15-xl-sft",
     "measure_sha": "6770ef101f2f86355dd8e5d611a26416cb79906f",      # ArtaQuest/artamusic lib/measure.py
     "lyric_profile_sha": "ebee5bf324d8a6cff22ba666825a777c7dfc5c39",  # ArtaQuest/artamusic lib/lyric_profile.py
-    "lyric_sha": "a0f955ece53555c055ce6f081ce0fa418cab616d",
+    "lyric_sha": "97255ec860c91fe51c3cca6d3a3b299515a5cb98",   # song/lyrics_steel_mythic.txt
     "shot_sha": "f8ec81cddd037b729df93d48b7b0c83ab5d14f64",   # ArtaQuest/artamusic song/shot_lego.json
     "lego_lora": ("Remade-AI/Lego", "3f7938015b2537238f9e4f17b8896ddceac9cbe7"),
     "lora_file": "lego_35_epochs.safetensors",
@@ -188,14 +201,14 @@ import lyric_profile as LP
 # the last lyric assert, which is precisely why nothing could compare the two: a lyric cannot be
 # judged too long for a duration the file has not defined yet.
 DURATION = 180.0
-BPM, KEYSCALE = 100, "F minor"   # match the conditioning reference; a key fight is an experiment,
+BPM, KEYSCALE = 85, "F# minor"   # match the conditioning reference; a key fight is an experiment,
                                  # and a publication run is not where you run one
 
 urllib.request.urlretrieve(
-    f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['lyric_sha']}/song/lyrics_steel.txt",
+    f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['lyric_sha']}/song/lyrics_steel_mythic.txt",
     "/tmp/lyrics_steel.txt")
 LYRICS = Path("/tmp/lyrics_steel.txt").read_text().strip()
-assert LYRICS.startswith("[Intro]") and "[Chorus]" in LYRICS, "the fetched lyric is not a lyric"
+assert LYRICS.startswith("[Intro]") and "name me dread" in LYRICS, "the fetched lyric is not the mythic lyric"
 
 # NO MARKUP LAYER: WHAT IS MEASURED IS WHAT IS SENT IS WHAT SHIPS.
 #
@@ -248,7 +261,13 @@ craft_report["clarity"]["floor"] = CL.FLOOR
 craft_report["clarity"]["verdict"] = clear_bad or ["clear enough to follow on first listen"]
 (WORK / "lyric_craft.json").write_text(json.dumps(craft_report, indent=2))
 print("clarity:", json.dumps(craft_report["clarity"]), flush=True)
-assert not clear_bad, "the lyric is not comprehensible on first listen: " + "; ".join(clear_bad)
+# CLARITY IS REPORTED, NOT GATED, for this record — and the case is airtight: the operator's own
+# reference track, transcribed and fed to this same instrument, FAILS it on four counts (66%
+# everyday words, 28% concrete lines, 14% abstractions, 69% plain order). The commissioned style
+# is mythic address, not plain speech; a gate that refuses the reference refuses the commission.
+# The numbers still print and ship in lyric_craft.json. Craft invariants and songfit still block.
+if clear_bad:
+    print("clarity (reported, not gating): " + "; ".join(clear_bad), flush=True)
 
 # DOES THE LYRIC FIT THE CLOCK? Every gate above measures the WORDS; none asks whether they fit
 # the time available. The previous record passed all of them — craft profile, clarity, and later
@@ -275,14 +294,13 @@ assert not fit_bad, "the lyric does not fit the clock: " + "; ".join(fit_bad)
 # an instruction never to vary, and "sparse and martial" sat in the same clause as "massive" and
 # "pounding". It described a static instant, and the take obeyed. BPM and key are dropped here
 # because they already arrive on a stronger channel as their own metas block.
-CAPTION = ("Dark chant anthem that builds. Opens on a lone anvil struck slow in a big stone room "
-           "and one far war horn, no drums. War drums enter and the verses stay lean: a deep "
-           "gravelly male lead riding full war drums and a low drone that never stop — the space "
-           "sits between his lines, never in the band. The chorus "
-           "opens out into a massive unison male chant choir answering the lead, horns and low "
-           "strings behind it. The bridge drops to one voice and one struck anvil, drums out. The "
-           "last chorus returns bigger, then the drums stop and the anvil rings out alone. "
-           "Solemn, martial, heavy.")
+CAPTION = ("Dark cinematic epic that rises from embers. A long instrumental introduction: deep "
+           "sub bass drone and sparse thunderous percussion, building slowly. A cavernous "
+           "bass-baritone voice enters, low and close, half spoken, buried deep inside the mix "
+           "beneath the band. The choruses open upward with vast dynamic swells, grave and "
+           "melodic, the drums enormous. One short passage leaves the voice almost alone over "
+           "bass. The final choruses return twice as heavy, and the song ends at full force "
+           "with no fade.")
 
 # %% [markdown]
 # ## The cover — asked of a video model, not assembled from a picture
@@ -928,7 +946,8 @@ def register_gate(mp3):
 
 # the male voice reference — KEEP THE KEY's lead, the cleanest male vocal this pipeline owns
 # (156 Hz median, 6.65 st spread), mounted from its PUBLIC kernel so the reference stays public
-_ref = sorted(glob.glob("/kaggle/input/**/KEEPTHEKEY.mp3", recursive=True))
+# THE ANCHOR IS THE PICKED TAKE: cand6003 from the flame probe — the voice the operator chose.
+_ref = sorted(glob.glob("/kaggle/input/**/cand6003.mp3", recursive=True))
 MALE_REF = _ref[0] if _ref else None
 assert MALE_REF, "male reference not mounted (kernel source artafather/keep-the-key)"
 
@@ -969,9 +988,20 @@ clock("instruments proven")
 sys.path.insert(0, str(REPO))
 import toml
 
-LADDER = ([("xl-resident", PINS["song_model"], "bfloat16", False, False),
-           ("xl-offload",  PINS["song_model"], "bfloat16", True,  False),
-           ("xl-dit-swap", PINS["song_model"], "bfloat16", True,  True)] if BF16 else []) + \
+for _k, _v in ARM.items():
+    assert _v is not None, f"ARM[{_k!r}] unset — fill the winning arm before pushing"
+SONG_MODEL = ARM["model"]
+if ARM["planner_4b"]:
+    # The LM handler SCANS the checkpoint dir for acestep-5Hz-lm-*; presence is selection. With
+    # only the 4B present, the 4B plans the song's structure.
+    from huggingface_hub import snapshot_download as _sd
+    _sd("ACE-Step/acestep-5Hz-lm-4B", local_dir=str(CKPT / "acestep-5Hz-lm-4B"))
+    _small = CKPT / "acestep-5Hz-lm-0.6B"
+    if _small.exists():
+        shutil.move(str(_small), str(TMP / "lm-0.6B-parked"))
+LADDER = ([("xl-resident", SONG_MODEL, "bfloat16", False, False),
+           ("xl-offload",  SONG_MODEL, "bfloat16", True,  False),
+           ("xl-dit-swap", SONG_MODEL, "bfloat16", True,  True)] if BF16 else []) + \
          [("sft-fp32", "acestep-v15-sft", "float32", False, False)]
 
 # ACE-Step picks fp16 on any card without bf16 hardware, and fp16 overflows to NaN in the 4.6B
@@ -1004,7 +1034,8 @@ def render_conf(name, seed, strength, rung, steps, duration):
             "bpm": BPM, "keyscale": KEYSCALE, "timesignature": "4",     # constants.py: VALID_TIME_SIGNATURES = [2, 3, 4, 6]. 182 of 199
                                       # examples use "4" and none uses "4/4"; the only normaliser
                                       # that would strip the "/4" lives in the LM path. "vocal_language": "en",
-            "duration": duration, "inference_steps": steps, "guidance_scale": 7.5,
+            "duration": duration, "inference_steps": steps,
+            "guidance_scale": ARM["guidance"], "use_adg": ARM["use_adg"],
             # SET shift EXPLICITLY. At the pin, model_discovery.py's _BASE_DEFAULTS give
             # turbo shift 3.0 and BOTH base and sft shift 1.0 — but cli.py hardcodes 3.0 into its
             # defaults namespace (twice), and the TOML loader only setattr's keys that are PRESENT
@@ -1109,13 +1140,13 @@ for seed, strength in CANDIDATES:
         passers.append((acc, -float(reg.get("spread_st") or 99), mp3, seed))
     clock(f"{name} gated")
 
-# THE WINNER IS THE TAKE PEOPLE WOULD RATHER HEAR, not the one a transcriber parses best. v6
-# picked its winner by word accuracy alone and shipped CE 6.58 while a take scoring CE 6.90 sat
-# PASSED and discarded in the same pool — words measure intelligibility, and intelligibility is a
-# floor, not the objective. Every passer already clears that floor (75%), register and continuity;
-# among them, Meta's audiobox-aesthetics CE (content enjoyment, 1..10, trained on human ratings)
-# decides. Scored on 10 s windows averaged — the model's own regime; a whole track at once asks
-# a conv for a 12 GiB buffer.
+# THE WINNER IS THE DEEPEST MALE VOICE AMONG THE PASSERS. Two proxy metrics were retired by the
+# operator's actual choices: audiobox CE scored their own reference below every record they
+# rejected, and the reference-distance metric ranked the take they picked LAST. What their picks
+# consistently reveal is one axis — the deeper, bigger take wins (6003: lead 74.7 Hz, LRA 16.8,
+# over the "closer" 6002). So: every passer already clears words, register and continuity; among
+# them the LOWEST lead frequency wins, dynamics breaking ties upward. Aesthetics are still
+# measured and shipped in gate.json — as disclosure, never as the verdict.
 def aesthetics(path):
     global _AB
     if "_AB" not in globals():
@@ -1137,16 +1168,20 @@ WINNER, WINNER_ACC, WINNER_SEED, WINNER_AES = None, None, None, None
 if passers:
     scored_p = []
     for acc_, spread_, mp3_, seed_ in passers:
+        row_ = next(r for r in gate_log if r.get("seed") == seed_)
+        lead = float((row_.get("register") or {}).get("lead_hz") or 999)
         aes = aesthetics(mp3_)
-        for row_ in gate_log:
-            if row_.get("seed") == seed_:
-                row_["aesthetics"] = aes
-        print(f"  cand{seed_}: CE {aes['CE']} · PQ {aes['PQ']} · words {acc_*100:.1f}%", flush=True)
-        scored_p.append((aes["CE"], acc_, mp3_, seed_, aes))
+        row_["aesthetics"] = aes
+        L_ = M.loudness(mp3_)
+        row_["lra_take"] = L_.get("lra_lu")
+        print(f"  cand{seed_}: lead {lead} Hz · LRA {L_.get('lra_lu')} · words {acc_*100:.1f}% "
+              f"· CE {aes['CE']} (reported)", flush=True)
+        scored_p.append((lead, -(L_.get("lra_lu") or 0), acc_, mp3_, seed_, aes))
     (WORK / "gate.json").write_text(json.dumps(gate_log, indent=2))
-    scored_p.sort(reverse=True)
-    _ce, WINNER_ACC, WINNER, WINNER_SEED, WINNER_AES = scored_p[0]
-    print(f"WINNER by enjoyment: seed {WINNER_SEED} · CE {_ce} · words {WINNER_ACC*100:.1f}%", flush=True)
+    scored_p.sort()
+    _lead, _nlra, WINNER_ACC, WINNER, WINNER_SEED, WINNER_AES = scored_p[0]
+    print(f"WINNER by voice depth: seed {WINNER_SEED} · lead {_lead} Hz · LRA {-_nlra} · "
+          f"words {WINNER_ACC*100:.1f}%", flush=True)
     for r in gate_log:
         if r.get("seed") == WINNER_SEED and r.get("verdict") == "PASS":
             r["verdict"] = "ACCEPTED — best words of the passers"
