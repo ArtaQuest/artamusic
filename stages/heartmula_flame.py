@@ -32,7 +32,12 @@ def clock(what): print(f"  ⏱ {what} · t+{(time.time()-T0)/60:.1f} min", flush
 
 PINS = {
     "heartlib": "3783bdb8441f2c298b1e64c8651173aac200361c",   # github.com/HeartMuLa/heartlib
-    "mula": "HeartMuLa/HeartMuLa-oss-3B-happy-new-year",
+    # The RL version, not happy-new-year: 13 of 13 takes across seven tag phrasings came out
+    # FEMALE-led on the base model — it ignores voice-gender tags in this style family — and the
+    # RL release's stated purpose is precise control over styles and tags. Same size, same
+    # pipeline; the male-register gate stays either way, because a tag is a request and the gate
+    # is a fact.
+    "mula": "HeartMuLa/HeartMuLa-RL-oss-3B-20260123",
     "codec": "HeartMuLa/HeartCodec-oss-20260123",
     "gen": "HeartMuLa/HeartMuLaGen",
     "lyric_sha": "a0f955ece53555c055ce6f081ce0fa418cab616d",   # song/lyrics_steel.txt (plain)
