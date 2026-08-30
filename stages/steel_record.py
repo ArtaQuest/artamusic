@@ -955,7 +955,7 @@ def register_gate(mp3):
 # THE ANCHOR IS THE PICKED TAKE: cand6003 from the flame probe — the voice the operator chose.
 _ref = sorted(glob.glob("/kaggle/input/**/cand6003.mp3", recursive=True))
 MALE_REF = _ref[0] if _ref else None
-assert MALE_REF, "male reference not mounted (kernel source artafather/keep-the-key)"
+assert MALE_REF, "the picked take not mounted (kernel source ashraasn/steel-ace-flame)"
 
 # THE REFERENCE CROP IS OURS, NOT random.randint's. At the pin, handler/io_audio.py picks the
 # three 10 s conditioning windows with random.randint() and nothing in the repo ever seeds
