@@ -356,10 +356,16 @@ def continuity(path, drop_db=20.0, min_hole_s=0.8, edge_s=3.0, local_s=10.0, tai
 # Calibrated on this pipeline's own takes: the seven-hole record scores 5+ holes / 7+ s under the
 # local judge and fails with margin; the sparse-intro take it wrongly condemned scores zero.
 # alive_frac floors the global guard: every real record here holds 0.25+; near-silence cannot.
-# dropout_s_max moved 3.0 -> 4.5 for the Flame style: its caption COMMISSIONS one passage where
-# the band leaves the voice almost alone, and a take with words at 77.8% was refused for a single
-# 4.18 s stop at exactly that moment. A genuine collapse still fails on the count and the floor.
-CONTINUITY = {"dropout_s_max": 4.5, "dropouts_max": 3, "alive_frac_min": 0.15}
+# THE RECALIBRATION IS ASYMMETRIC, and the selftest is why. The Flame style COMMISSIONS one
+# passage where the band leaves the voice almost alone — a take at 77.8% words was refused for a
+# single 4.18 s stop at exactly that moment — so a single hole may now run to 4.5 s. But widening
+# the total alone un-refused two known-bad cases (the seven-hole record and the three-dead-stops
+# control slid under 4.5), which the in-kernel selftest caught by failing the whole run. One
+# dramatic stop is a style; repeated stops are a defect: the COUNT tightens to 2 as the length
+# loosens. Every known case keeps its verdict: the approved take (0 holes) and the commissioned
+# stop (1 x 4.18 s) pass; the seven-hole record (3 holes after the local judge), the three-stop
+# control, and the dies-at-30 control (1 x 4.97 s) all still refuse.
+CONTINUITY = {"dropout_s_max": 4.5, "dropouts_max": 2, "alive_frac_min": 0.15}
 
 
 def continuity_verdict(c):
