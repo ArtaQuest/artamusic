@@ -17,7 +17,7 @@ PINS = {
     "ace_step_code": "6d467e4b5081ccb0abf1ec1bf4fdf9051a2d34b0",
     "song_model": "acestep-v15-xl-sft",
     "measure_sha": "199535aa517324d8021667b5a34a799aedd19353",
-    "lyric_sha": "8b7aa539108f",   # song/lyrics_steel_run.txt — Not Today (short sha OK: raw URL accepts it)
+    "lyric_sha": "d6d1e4c2393f69d3009d252ff838b1ff484af2dd",   # song/lyrics_steel_run.txt — Not Today (short sha OK: raw URL accepts it)
 }
 TMP = Path("/tmp/aq"); TMP.mkdir(exist_ok=True)
 REPO = TMP / "ACE-Step-1.5"; CKPT = TMP / "checkpoints"
@@ -45,7 +45,7 @@ sys.path.insert(0, "/tmp")
 import numpy as np, torch
 import measure as M
 LYRICS = Path("/tmp/lyrics.txt").read_text().strip()
-assert LYRICS.startswith("[Intro]") and "Not today" in LYRICS, "wrong lyric at pin"
+assert LYRICS.startswith("[Intro]") and "I am steel" in LYRICS, "wrong lyric at pin"
 _ref = sorted(Path("/kaggle/input").rglob("*KEEPTHEKEY*.mp3"))
 assert _ref, "male reference not mounted (kernel source artafather/keep-the-key)"
 MALE_REF = str(_ref[0])
