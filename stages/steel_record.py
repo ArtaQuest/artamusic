@@ -62,9 +62,10 @@ ARM = {
 PINS = {
     "ace_step_code": "6d467e4b5081ccb0abf1ec1bf4fdf9051a2d34b0",   # github.com/ACE-Step/ACE-Step-1.5
     "song_model": "acestep-v15-xl-sft",
+    "lyric_sha": "5ce7173cb210619e635aa6049b62e759f734cc31",   # song/lyrics_steel_run.txt — the marching lyric
     "measure_sha": "199535aa517324d8021667b5a34a799aedd19353",      # ArtaQuest/artamusic lib/measure.py
     "lyric_profile_sha": "ebee5bf324d8a6cff22ba666825a777c7dfc5c39",  # ArtaQuest/artamusic lib/lyric_profile.py
-    "lyric_sha": "90abe81e6c184cf288ab650a948ce3055779df78",   # song/lyrics_steel_run.txt
+
     "shot_sha": "f8ec81cddd037b729df93d48b7b0c83ab5d14f64",   # ArtaQuest/artamusic song/shot_lego.json
     "lego_lora": ("Remade-AI/Lego", "3f7938015b2537238f9e4f17b8896ddceac9cbe7"),
     "lora_file": "lego_35_epochs.safetensors",
@@ -207,16 +208,16 @@ import lyric_profile as LP
 # the last lyric assert, which is precisely why nothing could compare the two: a lyric cannot be
 # judged too long for a duration the file has not defined yet.
 DURATION = 180.0
-# RUNNING PACE, not the reference ballad's 85. A runner's cadence sits at 170-180 steps a minute
-# and music written for it lands on the same grid; 176 puts a step on every beat. The key moves
-# with it: A minor drives where F# minor brooded.
-BPM, KEYSCALE = 176, "A minor"
+# MARCHING PACE. 176 was a sprint; a march is one boot per beat at 120-130, and the lyric is
+# written to that grid — four stresses a line, every line opening on the downbeat. 128 keeps the
+# drive without the scramble. A minor stays: it drives where F# minor brooded.
+BPM, KEYSCALE = 128, "A minor"
 
 urllib.request.urlretrieve(
     f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['lyric_sha']}/song/lyrics_steel_run.txt",
     "/tmp/lyrics_steel.txt")
 LYRICS = Path("/tmp/lyrics_steel.txt").read_text().strip()
-assert LYRICS.startswith("[Intro]") and "Every mile is mine" in LYRICS, "the fetched lyric is not the running lyric"
+assert LYRICS.startswith("[Intro]") and "Every blow has made me strong" in LYRICS, "the fetched lyric is not the marching lyric"
 
 # NO MARKUP LAYER: WHAT IS MEASURED IS WHAT IS SENT IS WHAT SHIPS.
 #
@@ -302,13 +303,13 @@ assert not fit_bad, "the lyric does not fit the clock: " + "; ".join(fit_bad)
 # an instruction never to vary, and "sparse and martial" sat in the same clause as "massive" and
 # "pounding". It described a static instant, and the take obeyed. BPM and key are dropped here
 # because they already arrive on a stronger channel as their own metas block.
-CAPTION = ("Driving motivational anthem at running pace. Relentless four-on-the-floor kick and "
-           "fast hi-hats from the first bar, pounding toms, a hard rising bassline that never "
-           "lets up. A strong deep male voice out in front of the mix, urgent and clear, "
-           "shouting the chorus with a male gang-vocal answering him. Bright power chords and "
-           "soaring synth over the choruses, the bridge dropping to drums and voice alone before "
-           "the last chorus hits hardest. Uplifting, forward, unstoppable, ending at full force "
-           "with no fade.")
+CAPTION = ("Powerful marching anthem. A heavy stomping kick on every beat like boots on stone, "
+           "pounding floor toms and a hard bassline, handclaps on the backbeat. A strong deep "
+           "male voice out in front of the mix, urgent and clear, with a male gang-vocal "
+           "shouting the answers in the chorus. Big open power chords and brass swells lift the "
+           "choruses; the bridge drops to drums and a lone voice before the last chorus lands "
+           "twice as heavy. Motivational, relentless, triumphant, ending at full force with no "
+           "fade.")
 
 # %% [markdown]
 # ## The cover — asked of a video model, not assembled from a picture

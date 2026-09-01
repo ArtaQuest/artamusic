@@ -254,7 +254,28 @@ def precheck_source(py):
     # cover with no adapter on it, and says so in one line among nine hundred — which is how a
     # record shipped unstyled after the same diagnosis had already been made and fixed ELSEWHERE.
     # peft is what performs the injection; without it the same path fails the same quiet way.
+    # EVERY PINS[...] USE MUST HAVE A DEFINITION. A scripted edit once replaced the lyric_sha
+    # definition line with an empty string ('%s' formatting bound before *0 and emptied the whole
+    # replacement) — the three USES survived, this gate verified only the pins it could FIND, and
+    # the kernel would have died at KeyError in its first minute after a clean precheck. A used
+    # key with no definition is not "nothing to verify"; it is the failure.
     _src_txt = Path(py).read_text()
+    _used = set(re.findall(r"PINS\[[\'\"]([A-Za-z0-9_]+)[\'\"]\]", _src_txt))
+    # read the definitions from the AST, not by string surgery — a regex that cuts the dict at
+    # the first closing brace reported seven defined keys as missing on its first outing.
+    _defined = set()
+    import ast as _ast2
+    for _n in _ast2.walk(_ast2.parse(_src_txt)):
+        if (isinstance(_n, _ast2.Assign) and any(
+                isinstance(t, _ast2.Name) and t.id == "PINS" for t in _n.targets)
+                and isinstance(_n.value, _ast2.Dict)):
+            _defined = {k.value for k in _n.value.keys
+                        if isinstance(k, _ast2.Constant) and isinstance(k.value, str)}
+            break
+    _undef = _used - _defined if _defined else set()
+    if _undef:
+        raise RuntimeError(f"{py}: PINS keys used but never defined: {sorted(_undef)} — the kernel "
+                           "dies at KeyError in its first minute. Refusing to push.")
     if "load_lora_weights" in _src_txt or "load_lora_adapter" in _src_txt:
         _miss = [n for n, pat in (("torchao>=0.16.0", r"torchao>=0\.(1[6-9]|[2-9]\d)"), ("peft", r"[\s'\"]peft[\s'\"]"))
                  if not re.search(pat, _src_txt)]
