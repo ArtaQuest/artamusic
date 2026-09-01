@@ -62,7 +62,7 @@ ARM = {
 PINS = {
     "ace_step_code": "6d467e4b5081ccb0abf1ec1bf4fdf9051a2d34b0",   # github.com/ACE-Step/ACE-Step-1.5
     "song_model": "acestep-v15-xl-sft",
-    "lyric_sha": "5ce7173cb210619e635aa6049b62e759f734cc31",   # song/lyrics_steel_run.txt — the marching lyric
+    "lyric_sha": "f002c48338cbb891a1c798218ac44e4293b55f77",   # song/lyrics_steel_run.txt — the marching lyric
     "measure_sha": "199535aa517324d8021667b5a34a799aedd19353",      # ArtaQuest/artamusic lib/measure.py
     "lyric_profile_sha": "ebee5bf324d8a6cff22ba666825a777c7dfc5c39",  # ArtaQuest/artamusic lib/lyric_profile.py
 
