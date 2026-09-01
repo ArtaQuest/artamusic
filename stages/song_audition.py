@@ -17,7 +17,7 @@ PINS = {
     "ace_step_code": "6d467e4b5081ccb0abf1ec1bf4fdf9051a2d34b0",
     "song_model": "acestep-v15-xl-sft",
     "measure_sha": "199535aa517324d8021667b5a34a799aedd19353",
-    "lyric_sha": "d6d1e4c2393f69d3009d252ff838b1ff484af2dd",   # song/lyrics_steel_run.txt — Not Today (short sha OK: raw URL accepts it)
+    "lyric_sha": "a76c41626054930ae4da51d47bfca5c672ce6bdc",   # song/lyrics_steel_run.txt — Not Today (short sha OK: raw URL accepts it)
 }
 TMP = Path("/tmp/aq"); TMP.mkdir(exist_ok=True)
 REPO = TMP / "ACE-Step-1.5"; CKPT = TMP / "checkpoints"
