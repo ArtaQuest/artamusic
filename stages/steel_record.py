@@ -62,7 +62,7 @@ ARM = {
 PINS = {
     "ace_step_code": "6d467e4b5081ccb0abf1ec1bf4fdf9051a2d34b0",   # github.com/ACE-Step/ACE-Step-1.5
     "song_model": "acestep-v15-xl-sft",
-    "lyric_sha": "f002c48338cbb891a1c798218ac44e4293b55f77",   # song/lyrics_steel_run.txt — the marching lyric
+    "lyric_sha": "a76c41626054930ae4da51d47bfca5c672ce6bdc",   # song/lyrics_steel_run.txt — the marching lyric
     "measure_sha": "199535aa517324d8021667b5a34a799aedd19353",      # ArtaQuest/artamusic lib/measure.py
     "lyric_profile_sha": "ebee5bf324d8a6cff22ba666825a777c7dfc5c39",  # ArtaQuest/artamusic lib/lyric_profile.py
 
@@ -217,7 +217,7 @@ urllib.request.urlretrieve(
     f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['lyric_sha']}/song/lyrics_steel_run.txt",
     "/tmp/lyrics_steel.txt")
 LYRICS = Path("/tmp/lyrics_steel.txt").read_text().strip()
-assert LYRICS.startswith("[Intro]") and "Every blow has made me strong" in LYRICS, "the fetched lyric is not the marching lyric"
+assert LYRICS.startswith("[Intro]") and "I am steel" in LYRICS and "smooth as bone" in LYRICS, "the fetched lyric is not the approved steel lyric"
 
 # NO MARKUP LAYER: WHAT IS MEASURED IS WHAT IS SENT IS WHAT SHIPS.
 #
@@ -1108,7 +1108,10 @@ clock("song model held")
 # words at 0.20 and a male 145.9 Hz median at 0.35 — words fall as the reference's timbre takes
 # hold. Six takes sample it across two seeds instead of rolling one setting six times, and the gate
 # keeps the most intelligible take that still measures male.
-CANDIDATES = [(6001, 0.30), (6002, 0.30), (6003, 0.35), (6004, 0.35), (6005, 0.25), (6006, 0.25)]
+# Four takes, the APPROVED one first. The operator auditioned this exact configuration and chose
+# seed 6002 by ear; the deterministic crop and fixed seed reproduce that take here. Three spares
+# cover the case where a gate refuses it.
+CANDIDATES = [(6002, 0.30), (6001, 0.30), (6003, 0.35), (6004, 0.35)]
 gate_log, passers = [], []
 for seed, strength in CANDIDATES:
     name = f"cand{seed}"
@@ -1199,7 +1202,17 @@ if passers:
               f"· CE {aes['CE']} (both reported, neither selecting)", flush=True)
         scored_p.append((-acc_, lead, mp3_, seed_, aes))
     (WORK / "gate.json").write_text(json.dumps(gate_log, indent=2))
+    # THE OPERATOR'S EAR OUTRANKS THE PROXY. Take 6002 of this exact configuration was approved
+    # by audition; if its regeneration passes every floor it IS the winner, and clarity ranking
+    # only decides when the approved take itself failed a gate.
+    APPROVED = 6002
     scored_p.sort()
+    _app = [t for t in scored_p if t[3] == APPROVED]
+    if _app:
+        scored_p = _app + [t for t in scored_p if t[3] != APPROVED]
+        print(f"  approved take {APPROVED} passed its floors — selected per the audition", flush=True)
+    else:
+        print(f"  approved take {APPROVED} did NOT pass — falling back to clarity-best", flush=True)
     _nacc, _lead, WINNER, WINNER_SEED, WINNER_AES = scored_p[0]
     WINNER_ACC = -_nacc
     print(f"WINNER by clarity: seed {WINNER_SEED} · words {WINNER_ACC*100:.1f}% · lead {_lead} Hz",
@@ -1317,7 +1330,12 @@ def finish(src, wav_out, mp3_out, target_lufs):
 # nothing else — and the TARGET IS CHOSEN BY MEASUREMENT from a short ladder: the loudest target
 # whose cost, judged level-invariantly, stays within noise. With the judge normalised, cost now
 # means CONTENT damage (what the limiter chewed), not level.
-LADDER = [-10.0, -12.0]
+# LOUD ENOUGH FOR THE WEB, by instruction: a web page applies no loudness normalization (unlike
+# streaming platforms), so the file plays at its mastered level — a competitive anthem sits near
+# -9 to -10 LUFS. The ladder starts at -9 and steps down only if the limiter's measured CONTENT
+# cost (level-invariant judge) exceeds the 3-point band; true peak is ceilinged at -1.0 dBTP by
+# finish() so lossy encoders do not clip it.
+LADDER = [-9.0, -10.0, -11.5]
 arms, master_iters, scores = {}, {}, {}
 for tgt in LADDER:
     name = f"direct{int(tgt)}"
