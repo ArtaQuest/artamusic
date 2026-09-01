@@ -119,6 +119,64 @@ CONT_BLOCK = ("" if SONG_CONT is None else (
     f'{SONG_CONT["dropouts"]} dropouts against its own local context, '
     f'{int(SONG_CONT["alive_frac"]*100)}% of the track within 12 dB of its loud reference.</p>'))
 
+HERO = ""
+if SONG and _lv:
+    _vuri = uri(_lv)
+    HERO = f"""
+<div class="hero" id="hero">
+  <video id="hv" muted loop playsinline preload="auto" src="{_vuri}"></video>
+  <canvas id="fft"></canvas>
+  <button id="pp" aria-label="play">&#9654;</button>
+  <div class="hbar"><div id="hprog"></div></div>
+</div>
+<audio id="song" preload="auto" src="{SONG}"></audio>
+<script>
+(() => {{
+  const a = document.getElementById('song'), v = document.getElementById('hv'),
+        btn = document.getElementById('pp'), cv = document.getElementById('fft'),
+        prog = document.getElementById('hprog'), hero = document.getElementById('hero');
+  let ctx, an, data;
+  function wire() {{
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = ctx.createMediaElementSource(a);
+    an = ctx.createAnalyser(); an.fftSize = 512; an.smoothingTimeConstant = 0.82;
+    src.connect(an); an.connect(ctx.destination);
+    data = new Uint8Array(an.frequencyBinCount);
+  }}
+  function size() {{
+    cv.width = hero.clientWidth * devicePixelRatio;
+    cv.height = Math.round(hero.clientHeight * 0.42 * devicePixelRatio);
+  }}
+  addEventListener('resize', size);
+  function draw() {{
+    requestAnimationFrame(draw);
+    if (!an) return;
+    an.getByteFrequencyData(data);
+    const g = cv.getContext('2d'), W = cv.width, H = cv.height;
+    g.clearRect(0, 0, W, H);
+    const N = 96, step = Math.floor(data.length * 0.72 / N), bw = W / N;
+    g.shadowColor = 'rgba(255,255,255,.55)'; g.shadowBlur = 8 * devicePixelRatio;
+    for (let i = 0; i < N; i++) {{
+      let m = 0;
+      for (let j = 0; j < step; j++) m = Math.max(m, data[i * step + j]);
+      const h = Math.pow(m / 255, 1.35) * H;
+      g.fillStyle = 'rgba(255,255,255,' + (0.55 + 0.45 * (m / 255)) + ')';
+      g.fillRect(i * bw + bw * 0.18, H - h, bw * 0.64, h);
+    }}
+  }}
+  btn.addEventListener('click', async () => {{
+    if (!ctx) {{ wire(); size(); draw(); }}
+    if (ctx.state === 'suspended') await ctx.resume();
+    if (a.paused) {{ a.play(); v.play(); btn.innerHTML = '&#10074;&#10074;'; btn.classList.add('dim'); }}
+    else {{ a.pause(); v.pause(); btn.innerHTML = '&#9654;'; btn.classList.remove('dim'); }}
+  }});
+  a.addEventListener('timeupdate', () => {{
+    prog.style.width = (100 * a.currentTime / (a.duration || 1)) + '%';
+  }});
+  a.addEventListener('ended', () => {{ v.pause(); btn.innerHTML = '&#9654;'; btn.classList.remove('dim'); }});
+}})();
+</script>"""
+
 SONG_BLOCK = ("" if not SONG else f"""
   <h2>The song</h2>
   <audio controls preload="metadata" src="{SONG}" style="width:100%;margin:.75rem 0"></audio>
@@ -161,6 +219,16 @@ HTML = f"""<title>The Steel Rebuild</title>
   .prose {{ max-width:66ch; }}
   h1,h2 {{ font-family:var(--serif); font-weight:700; text-wrap:balance; margin:0; }}
   h1 {{ font-size:clamp(2.4rem,6vw,4rem); line-height:1.02; }}
+  .hero {{ position:relative; border-radius:1rem; overflow:hidden; background:#000; margin:0 0 1.6rem;
+          aspect-ratio:1/1; max-height:72vh; box-shadow:0 10px 40px rgba(0,0,0,.45); }}
+  .hero video {{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }}
+  .hero canvas {{ position:absolute; left:0; right:0; bottom:0; width:100%; height:42%; }}
+  .hero #pp {{ position:absolute; inset:0; margin:auto; width:5.2rem; height:5.2rem; border-radius:50%;
+              border:2px solid rgba(255,255,255,.85); background:rgba(0,0,0,.35); color:#fff;
+              font-size:1.9rem; cursor:pointer; backdrop-filter:blur(4px); transition:opacity .3s; }}
+  .hero #pp.dim {{ opacity:0; }} .hero:hover #pp.dim {{ opacity:.85; }}
+  .hbar {{ position:absolute; left:0; right:0; bottom:0; height:4px; background:rgba(255,255,255,.18); }}
+  #hprog {{ height:100%; width:0; background:#E8B923; }}
   h2 {{ font-size:clamp(1.6rem,3vw,2.1rem); margin-top:3.5rem; padding-top:1.5rem;
     border-top:1px solid var(--line); }}
   p {{ margin:.85rem 0; }}
@@ -182,6 +250,7 @@ HTML = f"""<title>The Steel Rebuild</title>
 </style>
 <main>
   <div class="eyebrow">ArtaQuest · ArtaMusic</div>
+  {HERO}
   <h1 style="margin-top:.6rem">The Steel Rebuild</h1>
   <p class="lede prose">An epic loop of hammering the hot sword, asked of a video model directly.
   This is the run that made it, and every number here is read from the run's own record.</p>
