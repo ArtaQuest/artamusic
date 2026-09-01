@@ -88,6 +88,10 @@ def _scope_check(node, enclosing, problems, label):
             nested.append(n); continue
         if isinstance(n, _a.ClassDef):
             nested.append(n); continue
+        if isinstance(n, _a.Lambda):
+            # a lambda is its own scope: its parameters bind inside it, and descending into its
+            # body without them flagged every `key=lambda L: L` in the first file that used one.
+            continue
         if isinstance(n, _a.Name) and isinstance(n.ctx, _a.Load) and n.id not in here:
             problems.append(f"{label}: {n.id}")
         stack.extend(_a.iter_child_nodes(n))
