@@ -163,9 +163,23 @@ clock("frames rendered")
 # the OOM killer taking the kernel is a failure that leaves neither log nor outputs.
 
 # %%
+# ACE-Step's dependencies are installed EXPLICITLY, not left to `pip install -e .`. The editable
+# install returned 0 and the model then died on `No module named 'loguru'` three probe renders
+# later — a minute of GPU wasted to learn something pip could have said at once. The list is the
+# record's, trimmed to what this notebook actually loads.
 sh(f"git clone -q https://github.com/ACE-Step/ACE-Step-1.5 {REPO} && "
-   f"cd {REPO} && git checkout -q {PINS['ace_step_code']} && pip -q install -e . 2>&1 | tail -3")
-sh("pip -q install toml 2>&1 | tail -2")
+   f"cd {REPO} && git checkout -q {PINS['ace_step_code']} && git log -n1 --format='code pin OK %h'")
+sh("pip install -q hf_transfer toml python-dotenv modelscope diskcache py3langid pyloudnorm "
+   "ffmpeg-python soundfile loguru einops accelerate numba scipy 'safetensors>=0.7.0' "
+   "'transformers>=4.51.0,<4.58.0' diffusers==0.39.0 peft vector-quantize-pytorch ftfy "
+   "sentencepiece protobuf torchcodec 2>&1 | tail -2")
+sh(f"cd {REPO} && pip install -q --no-deps -e . 2>&1 | tail -2")
+# Fail fast, on the line that says why: an import here costs seconds, and the same failure inside
+# the CLI costs a rung ladder and reports only "no audio".
+_imp = subprocess.run([sys.executable, "-c", "import acestep.handler; print('acestep imports')"],
+                      cwd=str(REPO), text=True, capture_output=True)
+print(_imp.stdout.strip() or _imp.stderr[-600:], flush=True)
+assert _imp.returncode == 0, "ACE-Step does not import — the music stage would fail three renders later"
 CKPT.mkdir(parents=True, exist_ok=True)
 CFG = {"pins": PINS, "seed": SEED, "tmp": str(TMP), "work": str(WORK), "out": str(OUT),
        "hf_home": os.environ["HF_HOME"],
