@@ -45,7 +45,7 @@ W, H, FPS = 1920, 1080, 24
 PINS = {
     # The animation, at a commit. A tag can move; a sha cannot, and the mascot's motion is the
     # one thing in this file that must be reproducible byte for byte.
-    "artalife": "e67295b5313e9442e2f9af96ec0eba35083f101a",
+    "artalife": "b8dd62c35bfbad3d1f81855186b6e946ce1433ed",
     "ace_step_code": "6d467e4b5081ccb0abf1ec1bf4fdf9051a2d34b0",   # github.com/ACE-Step/ACE-Step-1.5
     "song_model": "acestep-v15-xl-sft",
 }
@@ -477,7 +477,7 @@ DUR = SC.DUR
 sh(f"ffmpeg -v error -framerate {FPS} -i '{FRAMES}/%05d.png' -c:v libx264 -crf 17 -preset slow "
    f"-pix_fmt yuv420p -movflags +faststart '{TMP}/silent.mp4' -y")
 sh(f"ffmpeg -v error -i '{OUT}/teaser_music.wav' -af "
-   f"\"atrim=0:{DUR},afade=t=in:st=0:d=1.2,afade=t=out:st={DUR-2.5}:d=2.5,"
+   f"\"atrim=0:{DUR},afade=t=in:st=0:d=1.2,afade=t=out:st={DUR-2.4}:d=2.4,"
    f"loudnorm=I=-14:TP=-1.5:LRA=11\" -ar 48000 -ac 2 '{TMP}/bed.wav' -y")
 sh(f"ffmpeg -v error -i '{TMP}/silent.mp4' -i '{TMP}/bed.wav' -map 0:v -map 1:a -c:v copy "
    f"-c:a aac -b:a 192k -shortest -movflags +faststart '{OUT}/ArtaQuest_teaser.mp4' -y")
