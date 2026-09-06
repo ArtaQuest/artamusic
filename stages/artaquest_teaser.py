@@ -45,7 +45,7 @@ W, H, FPS = 1920, 1080, 24
 PINS = {
     # The animation, at a commit. A tag can move; a sha cannot, and the mascot's motion is the
     # one thing in this file that must be reproducible byte for byte.
-    "artalife": "140c5faf4d67dbaba0520211fd24a36c853a1f2a",
+    "artalife": "769f48352b8a5879ecc7231a7eee38f33f3ed387",
     "ace_step_code": "6d467e4b5081ccb0abf1ec1bf4fdf9051a2d34b0",   # github.com/ACE-Step/ACE-Step-1.5
     "song_model": "acestep-v15-xl-sft",
 }
@@ -129,8 +129,13 @@ print(f"fonts: {sorted(p.name for p in FONTS.glob('*.ttf'))}", flush=True)
 # It is a gate in the repository and it stays a gate here: the motion-safety law (no drawn point
 # moves more than 640 units a second, which on twos is 53 a drawing) and Arta standing on the
 # ground. It caught a 122 px teleport and a figure planted 39 px underground on its first run.
-sys.path.insert(0, str(SCENE / "teaser"))
-import generate as SC   # noqa: E402
+# Loaded by PATH, not by name: the two scene files share a basename, and importing either as
+# "generate" is how the rig resolved to itself on the first run.
+import importlib.util   # noqa: E402
+_spec = importlib.util.spec_from_file_location("aq_scene", SCENE / "teaser" / "generate.py")
+SC = importlib.util.module_from_spec(_spec)
+sys.modules["aq_scene"] = SC
+_spec.loader.exec_module(SC)
 CHECK = subprocess.run([sys.executable, str(SCENE / "teaser" / "generate.py"), "--check"],
                        text=True, capture_output=True)
 print(CHECK.stdout.strip(), flush=True)
