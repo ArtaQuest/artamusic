@@ -220,7 +220,13 @@ import torch
 import toml
 np.random.seed(SEED); torch.manual_seed(SEED)
 BF16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+import shutil as _sh
 print(f"[stage music] torch {torch.__version__} · bf16 {BF16}", flush=True)
+print(f"  interpreter {sys.executable} · shell python {_sh.which('python')}", flush=True)
+_probe = subprocess.run([sys.executable, "-c", "import loguru, acestep.handler; print('deps ok')"],
+                        cwd=str(REPO), text=True, capture_output=True)
+assert _probe.returncode == 0, f"the CLI's interpreter cannot import ACE-Step: {_probe.stderr[-400:]}"
+print(f"  {_probe.stdout.strip()}", flush=True)
 sys.path.insert(0, str(REPO))
 
 # ACE-Step picks fp16 on any card without bf16 hardware, and fp16 overflows to NaN in the 4.6B
@@ -269,10 +275,16 @@ def conf(name, seed, rung, steps):
             "batch_size": 1, "use_random_seed": False, "seeds": [seed]}
 
 def render(name, conf_dict, dtype):
+    # THE CLI RUNS ON THIS INTERPRETER, not on whatever `python` resolves to. pip installed
+    # ACE-Step's dependencies for sys.executable and the notebook proved the import; the shell's
+    # `python` was a different interpreter without loguru, so every rung reported "no audio" and
+    # the ladder concluded the card could not hold the model. It could; the shell could not find
+    # the package.
     c = TMP / f"{name}.toml"; c.write_text(toml.dumps(conf_dict))
     rc = sh(f"cd {REPO} && AQ_FORCE_DTYPE={dtype} PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True "
             f"PYTORCH_ALLOC_CONF=expandable_segments:True ACESTEP_GENERATION_TIMEOUT=2400 "
-            f"python cli.py -c {c} --backend pt --log-level INFO > /tmp/cli_{name}.txt 2>&1", quiet=True)
+            f"{sys.executable} cli.py -c {c} --backend pt --log-level INFO "
+            f"> /tmp/cli_{name}.txt 2>&1", quiet=True)
     found = sorted(Path(TMP / f"m_{name}").rglob("*.flac")) + sorted(Path(TMP / f"m_{name}").rglob("*.wav"))
     tail = Path(f"/tmp/cli_{name}.txt").read_text()[-800:] if Path(f"/tmp/cli_{name}.txt").exists() else ""
     return rc, found, tail
