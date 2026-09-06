@@ -45,7 +45,7 @@ W, H, FPS = 1920, 1080, 24
 PINS = {
     # The animation, at a commit. A tag can move; a sha cannot, and the mascot's motion is the
     # one thing in this file that must be reproducible byte for byte.
-    "artalife": "b8dd62c35bfbad3d1f81855186b6e946ce1433ed",
+    "artalife": "a14299310969b0c7aab8c976ba5058cfc4741af5",
     "ace_step_code": "6d467e4b5081ccb0abf1ec1bf4fdf9051a2d34b0",   # github.com/ACE-Step/ACE-Step-1.5
     "song_model": "acestep-v15-xl-sft",
 }
