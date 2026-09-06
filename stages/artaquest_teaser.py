@@ -45,7 +45,7 @@ W, H, FPS = 1920, 1080, 24
 PINS = {
     # The animation, at a commit. A tag can move; a sha cannot, and the mascot's motion is the
     # one thing in this file that must be reproducible byte for byte.
-    "artalife": "fa8cb4dcc368988ba5cf98d5fa7f892728480ea4",
+    "artalife": "e67295b5313e9442e2f9af96ec0eba35083f101a",
     "ace_step_code": "6d467e4b5081ccb0abf1ec1bf4fdf9051a2d34b0",   # github.com/ACE-Step/ACE-Step-1.5
     "song_model": "acestep-v15-xl-sft",
 }
@@ -496,10 +496,19 @@ info = json.loads(_p.stdout)
 vid = next(s for s in info["streams"] if s["codec_type"] == "video")
 aud = next((s for s in info["streams"] if s["codec_type"] == "audio"), None)
 dur = float(info["format"]["duration"])
-lr = subprocess.run(f"ffmpeg -v info -i '{FINAL}' -af ebur128=peak=true -f null - 2>&1 | tail -25",
-                    shell=True, text=True, capture_output=True).stdout
+# READ THE SUMMARY, NOT THE PROGRESS LINES. ebur128 prints a running I/LRA on every progress line
+# and a final Summary block at the end; `tail -25` catches nine progress lines first, so a regex
+# taking the FIRST match published a running LRA that had not finished converging — 4.8 against a
+# true 5.6, and the number moved with the arbitrary tail count. Peak and I happened to be right,
+# one because it appears only in the summary and one because it had already converged, which is
+# exactly why the wrong one went unnoticed.
+_lr_all = subprocess.run(f"ffmpeg -v info -i '{FINAL}' -af ebur128=peak=true -f null - 2>&1",
+                         shell=True, text=True, capture_output=True).stdout
+lr = _lr_all[_lr_all.rindex("Summary:"):] if "Summary:" in _lr_all else ""
+assert lr, "ebur128 printed no Summary block — the loudness figures would be running values"
+
 def grab(tag):
-    m = re.search(rf"{tag}:\s*(-?\d+\.?\d*)", lr)
+    m = re.search(rf"^\s*{tag}:\s*(-?\d+\.?\d*)", lr, re.M)
     return float(m.group(1)) if m else None
 LUFS, TP, LRA = grab("I"), grab("Peak"), grab("LRA")
 
