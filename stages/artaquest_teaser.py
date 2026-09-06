@@ -402,8 +402,16 @@ def main():
     import torchaudio
     bundle = torchaudio.pipelines.HDEMUCS_HIGH_MUSDB_PLUS
     sep = bundle.get_model().to("cuda").eval()
-    vi = list(bundle.sources).index("vocals")
-    print(f"  separator: HDemucs, sources {list(bundle.sources)}, {bundle.sample_rate} Hz", flush=True)
+    # The stem NAMES live on the model, not the bundle — SourceSeparationBundle has no `sources`
+    # attribute at this torchaudio version, and the gate died on it after rendering every take.
+    # The order is asked for rather than assumed, and only falls back to the documented one; a
+    # separator whose stems cannot be named must FAIL the gate, because picking the wrong index
+    # would measure the drums and call the take clean.
+    names = list(getattr(sep, "sources", None) or getattr(bundle, "sources", None)
+                 or ["drums", "bass", "other", "vocals"])
+    assert "vocals" in names, f"the separator does not name a vocal stem: {names}"
+    vi = names.index("vocals")
+    print(f"  separator: HDemucs, stems {names}, vocals at {vi}, {bundle.sample_rate} Hz", flush=True)
 
     def vocal_db(path):
         wav, sr = torchaudio.load(path)
