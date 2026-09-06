@@ -45,7 +45,7 @@ W, H, FPS = 1920, 1080, 24
 PINS = {
     # The animation, at a commit. A tag can move; a sha cannot, and the mascot's motion is the
     # one thing in this file that must be reproducible byte for byte.
-    "artalife": "769f48352b8a5879ecc7231a7eee38f33f3ed387",
+    "artalife": "8e46dc3013bd3859a6dcc94956882a5ccd030bf6",
     "ace_step_code": "6d467e4b5081ccb0abf1ec1bf4fdf9051a2d34b0",   # github.com/ACE-Step/ACE-Step-1.5
     "song_model": "acestep-v15-xl-sft",
 }
@@ -89,21 +89,42 @@ sh("df -h /tmp /kaggle/working | tail -3")
 # could not put a single tensor on the GPU. A shape can be requested but Kaggle normalises it
 # away, so the kernel adapts instead — a torch built for the CUDA line that still has Pascal
 # kernels, installed LAST, because whatever runs last wins.
-_cap = subprocess.run(
-    [sys.executable, "-c", "import torch;print(torch.cuda.get_device_capability(0)[0] "
-     "if torch.cuda.is_available() else 0)"], text=True, capture_output=True).stdout.strip()
-CAP = int(_cap) if _cap.isdigit() else 0
-PASCAL = 0 < CAP < 7
-print(f"compute capability major {CAP} · pascal {PASCAL}", flush=True)
-if PASCAL:
-    sh("pip install -q torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 "
-       "--index-url https://download.pytorch.org/whl/cu126 2>&1 | tail -2")
-    _gemm = subprocess.run(
-        [sys.executable, "-c",
-         "import torch;a=torch.randn(512,512,device='cuda');print(float((a@a).sum()) == float((a@a).sum()))"],
+# EVERY INSTALL NAMES ITS INTERPRETER. `pip` on PATH belongs to /usr/local/bin/python while this
+# notebook and its stages run /usr/bin/python3 — the two are already proven different on this image,
+# and a torch installed for the wrong one leaves the right one on the stock build with no Pascal
+# kernels, silently. `{sys.executable} -m pip` cannot make that mistake.
+PIP = f"{sys.executable} -m pip"
+
+def card_report(tag):
+    r = subprocess.run([sys.executable, "-c",
+        "import torch;print(torch.__version__, torch.version.cuda, torch.cuda.is_available(), "
+        "torch.cuda.get_device_name(0) if torch.cuda.is_available() else '-', "
+        "torch.cuda.get_device_capability(0) if torch.cuda.is_available() else '-')"],
         text=True, capture_output=True)
-    print(f"  pascal torch runs a matmul: {_gemm.stdout.strip() or _gemm.stderr[-300:]}", flush=True)
-    assert _gemm.returncode == 0, "the card still cannot execute a kernel — no point loading a model"
+    line = (r.stdout or r.stderr)[-300:].strip().replace("\n", " ")
+    print(f"CARD REPORT [{tag}] {line}", flush=True)
+    return line
+
+_before = card_report("before")
+CAP = 0
+_m = re.search(r"\((\d+),\s*\d+\)", _before)
+if _m:
+    CAP = int(_m.group(1))
+PASCAL = 0 < CAP < 7
+print(f"CARD REPORT compute capability major {CAP} · pascal {PASCAL} · pip {PIP}", flush=True)
+if PASCAL:
+    # The record's line: a torch built for a CUDA line that still carries Pascal kernels, installed
+    # LAST so it wins. This is the whole reason four runs reported a model that would not load.
+    sh(f"{PIP} install -q torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 "
+       f"--index-url https://download.pytorch.org/whl/cu126 2>&1 | tail -3")
+    card_report("after")
+_gemm = subprocess.run(
+    [sys.executable, "-c", "import torch;a=torch.randn(512,512,device='cuda');"
+     "b=a@a;print('MATMUL OK', float(b.sum()) == float(b.sum()))"],
+    text=True, capture_output=True)
+print(f"CARD REPORT matmul: {(_gemm.stdout or _gemm.stderr)[-260:].strip()}", flush=True)
+assert _gemm.returncode == 0, ("the card cannot execute a kernel — every model would fail to load "
+                               "and report something else entirely")
 
 # %% [markdown]
 # ## The picture: Arta, from its own repository
@@ -192,11 +213,11 @@ clock("frames rendered")
 # record's, trimmed to what this notebook actually loads.
 sh(f"git clone -q https://github.com/ACE-Step/ACE-Step-1.5 {REPO} && "
    f"cd {REPO} && git checkout -q {PINS['ace_step_code']} && git log -n1 --format='code pin OK %h'")
-sh("pip install -q hf_transfer toml python-dotenv modelscope diskcache py3langid pyloudnorm "
+sh(f"{PIP} install -q hf_transfer toml python-dotenv modelscope diskcache py3langid pyloudnorm "
    "ffmpeg-python soundfile loguru einops accelerate numba scipy 'safetensors>=0.7.0' "
    "'transformers>=4.51.0,<4.58.0' diffusers==0.39.0 peft vector-quantize-pytorch ftfy "
    "sentencepiece protobuf torchcodec 2>&1 | tail -2")
-sh(f"cd {REPO} && pip install -q --no-deps -e . 2>&1 | tail -2")
+sh(f"cd {REPO} && {PIP} install -q --no-deps -e . 2>&1 | tail -2")
 # Fail fast, on the line that says why: an import here costs seconds, and the same failure inside
 # the CLI costs a rung ladder and reports only "no audio".
 _imp = subprocess.run([sys.executable, "-c", "import acestep.handler; print('acestep imports')"],
