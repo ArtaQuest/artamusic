@@ -82,6 +82,29 @@ print(f"python {sys.version.split()[0]}", flush=True)
 sh("nvidia-smi --query-gpu=name,memory.total --format=csv,noheader")
 sh("df -h /tmp /kaggle/working | tail -3")
 
+# ── ADAPT TO THE CARD. Kaggle's default accelerator is a P100 (sm_60) and its stock torch ships
+# kernels for sm_70 and up, so on a P100 every CUDA call fails with "no kernel image is available
+# for execution on the device". That is what four runs of this notebook actually died of: the
+# music model reported "5Hz LM not initialized", which is what you see when the model behind it
+# could not put a single tensor on the GPU. A shape can be requested but Kaggle normalises it
+# away, so the kernel adapts instead — a torch built for the CUDA line that still has Pascal
+# kernels, installed LAST, because whatever runs last wins.
+_cap = subprocess.run(
+    [sys.executable, "-c", "import torch;print(torch.cuda.get_device_capability(0)[0] "
+     "if torch.cuda.is_available() else 0)"], text=True, capture_output=True).stdout.strip()
+CAP = int(_cap) if _cap.isdigit() else 0
+PASCAL = 0 < CAP < 7
+print(f"compute capability major {CAP} · pascal {PASCAL}", flush=True)
+if PASCAL:
+    sh("pip install -q torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 "
+       "--index-url https://download.pytorch.org/whl/cu126 2>&1 | tail -2")
+    _gemm = subprocess.run(
+        [sys.executable, "-c",
+         "import torch;a=torch.randn(512,512,device='cuda');print(float((a@a).sum()) == float((a@a).sum()))"],
+        text=True, capture_output=True)
+    print(f"  pascal torch runs a matmul: {_gemm.stdout.strip() or _gemm.stderr[-300:]}", flush=True)
+    assert _gemm.returncode == 0, "the card still cannot execute a kernel — no point loading a model"
+
 # %% [markdown]
 # ## The picture: Arta, from its own repository
 #
