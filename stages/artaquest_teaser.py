@@ -290,6 +290,21 @@ def render(name, conf_dict, dtype):
     return rc, found, tail
 
 def main():
+    # THE STRUCTURE-PLANNING LM MUST BE ON DISK, because `thinking: true` asks for it. The handler
+    # SCANS the checkpoint directory for acestep-5Hz-lm-*: presence is selection, and absence is
+    # not a fallback — the CLI returns rc 0, prints "5Hz LM not initialized" and writes no audio,
+    # which the rung ladder reads as "this card cannot hold the model". The 0.6B planner is the
+    # right size here: it plans where the energy goes across twenty-two seconds of bed, and the 4B
+    # the record uses is for a song with verses.
+    from huggingface_hub import snapshot_download
+    lm = CKPT / "acestep-5Hz-lm-0.6B"
+    if not lm.exists():
+        snapshot_download("ACE-Step/acestep-5Hz-lm-0.6B", local_dir=str(lm))
+    found_lm = sorted(p.name for p in CKPT.glob("acestep-5Hz-lm-*"))
+    print(f"  planner on disk: {found_lm}", flush=True)
+    assert found_lm, "no 5Hz LM in the checkpoint dir — every render would report no audio"
+    clock("planner ready")
+
     # A rung is held because it RENDERS, not because it loads: on a T4 the resident rung loads at
     # 12.1 GB and then OOMs inside the CLI on a 1.2 GB attention softmax, returning rc 0 with no
     # file. Each rung is probed with a FULL-LENGTH render at 2 steps — attention buffers scale
