@@ -272,6 +272,7 @@ def conf(name, seed, rung, steps):
             "seed": seed, "infer_method": "ode",
             "use_cot_metas": False, "use_cot_caption": False,
             "use_cot_lyrics": False, "use_cot_language": False,
+            "lm_model_path": "acestep-5Hz-lm-0.6B",
             "batch_size": 1, "use_random_seed": False, "seeds": [seed]}
 
 def render(name, conf_dict, dtype):
@@ -286,8 +287,17 @@ def render(name, conf_dict, dtype):
             f"{sys.executable} cli.py -c {c} --backend pt --log-level INFO "
             f"> /tmp/cli_{name}.txt 2>&1", quiet=True)
     found = sorted(Path(TMP / f"m_{name}").rglob("*.flac")) + sorted(Path(TMP / f"m_{name}").rglob("*.wav"))
-    tail = Path(f"/tmp/cli_{name}.txt").read_text()[-800:] if Path(f"/tmp/cli_{name}.txt").exists() else ""
-    return rc, found, tail
+    log = Path(f"/tmp/cli_{name}.txt")
+    txt = log.read_text() if log.exists() else ""
+    if not found and txt:
+        # The lines that decide whether the planner loaded, wherever they are in the file.
+        keep = [l for l in txt.splitlines()
+                if any(k in l for k in ("LM", "lm_model", "Initializ", "checkpoint_dir",
+                                        "Error", "error", "Traceback", "CUDA", "memory", "❌"))]
+        print("  --- the CLI's own account of it ---", flush=True)
+        for l in keep[-40:]:
+            print(f"  | {l[:170]}", flush=True)
+    return rc, found, txt[-800:]
 
 def main():
     # THE STRUCTURE-PLANNING LM MUST BE ON DISK, because `thinking: true` asks for it. The handler
