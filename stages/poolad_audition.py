@@ -1,9 +1,9 @@
 # %% [markdown]
-# # پولاد (POOLAD) — the Persian STEEL, on audition
+# # فولاد (FOOLAD) — the Persian STEEL, on audition
 #
-# The lyric of STEEL, rewritten as Persian epic verse — the Shahnameh's own metre, بحر متقارب
-# (fa'ūlun fa'ūlun fa'ūlun fa'ul), rhymed couplets — sung by the same model at the same
-# production settings that made the English record, with the vocal language switched to Persian.
+# The lyric of STEEL, rewritten in everyday Tehran Persian — spoken forms, short four-beat lines,
+# exact colloquial rhymes (the first draft's Shahnameh metre forced ancient words the operator
+# could not hear sung well) — by the same model at the production settings, vocal language fa.
 # Five takes from the seed they chose, so the operator can approve BY EAR before the production slot is spent.
 #
 # Caption only, by the operator's ear: audition 1's caption-only takes were the ones they liked
@@ -32,7 +32,7 @@ PINS = {
     "song_model": "acestep-v15-xl-sft",
     "planner": "acestep-5Hz-lm-1.7B",   # the approved take's planner (ACE-Step's default); the 4B does not fit a T4 beside the XL
     "measure_sha": "199535aa517324d8021667b5a34a799aedd19353",     # ArtaQuest/artamusic lib/measure.py
-    "lyric_sha": "1c3d0089c89beb613cce703cededcf37c0cc675c",                            # ArtaQuest/artamusic song/lyrics_poolad_fa.txt
+    "lyric_sha": "d739c92073c61e4bf38bd66417eb9150c733d66c",   # ArtaQuest/artamusic song/lyrics_foolad_fa.txt
     "torch_pascal": "2.7.1", "cuda_line_pascal": "cu126",
     "asr": "large-v3",
 }
@@ -72,14 +72,14 @@ urllib.request.urlretrieve(
     f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['measure_sha']}/lib/measure.py",
     "/tmp/measure.py")
 urllib.request.urlretrieve(
-    f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['lyric_sha']}/song/lyrics_poolad_fa.txt",
+    f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['lyric_sha']}/song/lyrics_foolad_fa.txt",
     "/tmp/lyrics_fa.txt")
 sys.path.insert(0, "/tmp")
 import numpy as np, torch
 a = torch.randn(256, 256, device="cuda"); assert torch.isfinite(a @ a).all(), "CUDA matmul failed — wrong torch for this card"
 import measure as M
 LYRICS = Path("/tmp/lyrics_fa.txt").read_text(encoding="utf-8").strip()
-assert LYRICS.startswith("[Intro]") and "پولاد" in LYRICS, "wrong lyric at pin"
+assert LYRICS.startswith("[Intro]") and "منم فولاد" in LYRICS, "wrong lyric at pin"
 _ref = sorted(Path("/kaggle/input").rglob("STEEL.mp3"))
 assert _ref, "the STEEL lead is not mounted (kernel source artafather/steel-record-final)"
 MALE_REF = str(_ref[0])
@@ -87,13 +87,13 @@ print(f"card capability {CAP} · pascal {PASCAL} · reference {MALE_REF}", flush
 
 # The caption is the only channel the model parses for arrangement; the instruction+caption+metas
 # template truncates SILENTLY at 256 tokens, so this stays well under ~700 characters.
-CAPTION = ("Persian epic anthem in the spirit of the Shahnameh: a deep, powerful male voice "
-           "declaiming Persian verse out in front of the mix, proud and relentless. War drums, "
-           "kus and dohol, pound a heavy march on every beat with daf and tombak driving under "
-           "them; santur and kamancheh carry the melody and a ney answers each line; low brass "
-           "and a male choir swell the choruses. The bridge drops to drums and the lone voice "
-           "before the last chorus lands twice as heavy. Chahargah heroic mode, cinematic, "
-           "triumphant, ending at full force with no fade.")
+CAPTION = ("Iranian epic rock anthem sung in modern Tehrani Persian (Farsi), every word clear and "
+           "naturally pronounced by a deep, powerful male voice out in front of the mix, proud and "
+           "relentless. War drums pound a heavy march on every beat with daf and tombak driving "
+           "under them; santur and kamancheh carry the melody, a ney answers the lines; distorted "
+           "guitars, low brass and a male choir swell the choruses. The bridge drops to drums and "
+           "the lone voice before the last chorus lands twice as heavy. Cinematic, triumphant, "
+           "ending at full force with no fade.")
 assert len(CAPTION) < 700, len(CAPTION)
 BPM, KEYSCALE, DURATION = 112, "D minor", 180.0
 clock("inputs ready")
