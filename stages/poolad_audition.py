@@ -32,7 +32,7 @@ PINS = {
     "song_model": "acestep-v15-xl-sft",
     "planner": "acestep-5Hz-lm-1.7B",   # the approved take's planner (ACE-Step's default); the 4B does not fit a T4 beside the XL
     "measure_sha": "199535aa517324d8021667b5a34a799aedd19353",     # ArtaQuest/artamusic lib/measure.py
-    "lyric_sha": "5f335210565f25188058b82f4d493c3db965163d",                            # ArtaQuest/artamusic song/lyrics_poolad_fa.txt
+    "lyric_sha": "08802d63e0d6e6881fb9363ea901e15241e64092",                            # ArtaQuest/artamusic song/lyrics_poolad_fa.txt
     "torch_pascal": "2.7.1", "cuda_line_pascal": "cu126",
     "asr": "large-v3",
 }

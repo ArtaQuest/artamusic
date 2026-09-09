@@ -42,7 +42,7 @@ LYRICS = """[Intro]
 منم تیغِ پولاد و آتش به جان
 به هر روز و شب سوزدم در نهان
 خمم کن، بجَستم به پا استوار
-که پتک از همین رو زند بار بار
+که پتک از همین رو کند کار و بار
 
 [Verse 2]
 به آبم فرو کن، شنو نعره‌ام
@@ -54,18 +54,18 @@ LYRICS = """[Intro]
 منم تیغِ پولاد و آتش به جان
 به هر روز و شب سوزدم در نهان
 خمم کن، بجَستم به پا استوار
-که پتک از همین رو زند بار بار
+که پتک از همین رو کند کار و بار
 
 [Bridge]
 چو تیغی بخسبد، به زنگار رود
 شه و تاج و تختش به خاکی شود
-پس از کار، زنگار من را بَرَد
+چو کارم سرآید، مرا زنگ خورَد
 ولی پیش از آن نی، که کارم بُوَد
 
 [Instrumental Break]
 
 [Verse 3]
-چو کرنا دمد، تیغ را برکشید
+چو کرنا دمد، تیغِ من برکشید
 مرا بهرِ دستی که هرگز ندید
 به کف دسته‌ام را بسای و بِبَر
 تو سنگی شوی و منم درگذر
@@ -74,10 +74,10 @@ LYRICS = """[Intro]
 منم تیغِ پولاد و آتش به جان
 به هر روز و شب سوزدم در نهان
 خمم کن، بجَستم به پا استوار
-که پتک از همین رو زند بار بار
+که پتک از همین رو کند کار و بار
 
 [Outro]
-منم تیغِ پولاد، دیدم شرار
+منم تیغِ پولاد و دیدم شرار
 به هر ضربه بالا شدم، استوار"""
 GLOSS = """[Intro]
 
@@ -91,7 +91,7 @@ was paid for with a night of blood and toil and fever.
 I am the steel blade, with fire in my soul;
 every day and night it burns in me, unseen.
 Bend me — I have sprung back to my feet, steadfast:
-that is why the hammer strikes, again and again.
+that is why the hammer does its work.
 
 [Verse 2]
 Plunge me into the water and hear my roar;
@@ -103,18 +103,18 @@ the years of fire have left their mark in it.
 I am the steel blade, with fire in my soul;
 every day and night it burns in me, unseen.
 Bend me — I have sprung back to my feet, steadfast:
-that is why the hammer strikes, again and again.
+that is why the hammer does its work.
 
 [Bridge]
 A blade that sleeps goes to rust;
 the king, his crown and his throne turn to dust.
-After the work, let rust take me —
+When my work is over, let rust eat me —
 but not before, while my work remains.
 
 [Instrumental Break]
 
 [Verse 3]
-When the horn sounds, draw the blade:
+When the horn sounds, draw my blade:
 I was made for a hand that has never seen me.
 Wear my hilt smooth in your palm and carry me —
 you will turn to stone, and I go on.
@@ -123,10 +123,10 @@ you will turn to stone, and I go on.
 I am the steel blade, with fire in my soul;
 every day and night it burns in me, unseen.
 Bend me — I have sprung back to my feet, steadfast:
-that is why the hammer strikes, again and again.
+that is why the hammer does its work.
 
 [Outro]
-I am the steel blade; I have met the flame.
+I am the steel blade, and I have met the flame.
 With every strike I rose higher, steadfast."""
 for _fa, _en in zip(LYRICS.splitlines(), GLOSS.splitlines()):
     print(f"{_fa:<44}  {_en}" if not _fa.startswith("[") else _fa)
