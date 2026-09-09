@@ -4,12 +4,12 @@
 # The lyric of STEEL, rewritten as Persian epic verse — the Shahnameh's own metre, بحر متقارب
 # (fa'ūlun fa'ūlun fa'ūlun fa'ul), rhymed couplets — sung by the same model at the same
 # production settings that made the English record, with the vocal language switched to Persian.
-# Two arms, two seeds each, so the operator can approve BY EAR before the production slot is spent:
+# Three male takes, so the operator can approve BY EAR before the production slot is spent.
 #
-# | Arm | Conditioning | Why |
-# |---|---|---|
-# | A `anchor` | the published STEEL lead as `reference_audio` | the reference is what held the male register 22/22 times when tags alone did not; it also carries the march |
-# | B `caption` | caption only | the register lottery, but the arrangement is free to be Persian |
+# Male only, by order: every take conditions on the published STEEL lead as `reference_audio`
+# (the first audition measured it — 2/2 male with the reference, 0/2 without), and each take is
+# gated on its separated stem; a female take is deleted where it lands and the seed rolls on
+# until three male takes exist.
 #
 # Model: ACE-Step 1.5 XL (4.6B, sft) at the pinned commit with the 1.7B structure planner — the
 # newest weights on the ACE-Step org (the later "-diffusers" entries are format ports), and the
@@ -32,7 +32,7 @@ PINS = {
     "song_model": "acestep-v15-xl-sft",
     "planner": "acestep-5Hz-lm-1.7B",   # the approved take's planner (ACE-Step's default); the 4B does not fit a T4 beside the XL
     "measure_sha": "199535aa517324d8021667b5a34a799aedd19353",     # ArtaQuest/artamusic lib/measure.py
-    "lyric_sha": "08802d63e0d6e6881fb9363ea901e15241e64092",                            # ArtaQuest/artamusic song/lyrics_poolad_fa.txt
+    "lyric_sha": "1c3d0089c89beb613cce703cededcf37c0cc675c",                            # ArtaQuest/artamusic song/lyrics_poolad_fa.txt
     "torch_pascal": "2.7.1", "cuda_line_pascal": "cu126",
     "asr": "large-v3",
 }
@@ -224,31 +224,43 @@ def vocal_stem(mp3):
         f'--two-stems vocals -n htdemucs --shifts 0 --device cpu -o "{td}" "{norm}"'))
     return next(Path(td).rglob("vocals.wav"), None)
 
-report = []
-ARMS = [("anchor", MALE_REF), ("caption", None)]
-for arm, ref in ARMS:
-    for seed in (6001, 6002):
-        name = f"{arm}{seed}"
-        t1 = time.time()
-        rc, found = cli_render(name, render_conf(name, seed, chosen, 80, ref), chosen["dtype"])
-        assert found, f"{name}: no audio (rc {rc}) — {Path(f'/tmp/cli_{name}.txt').read_text(errors='replace')[-300:]}"
-        mp3 = OUT / f"{name}.mp3"
-        sh(f"ffmpeg -v error -i '{found[0]}' -codec:a libmp3lame -b:a 320k '{mp3}' -y")
-        row = {"arm": arm, "seed": seed, "seconds": round(time.time()-t1), "reference": bool(ref)}
+# MALE ONLY (operator, 2026-09-09). The first audition proved the reference holds the register
+# (2/2 male with it, 0/2 without), so the caption-only arm is retired and the register is GATED:
+# every take is read on its separated stem, a female take is deleted on the spot, and seeds roll
+# on until WANT male takes exist. The attempts are all logged; only the male audio ships.
+WANT, MAX_TRIES = 3, 6
+report, kept = [], 0
+for seed in range(6001, 6001 + MAX_TRIES):
+    if kept >= WANT:
+        break
+    name = f"anchor{seed}"
+    t1 = time.time()
+    rc, found = cli_render(name, render_conf(name, seed, chosen, 80, MALE_REF), chosen["dtype"])
+    assert found, f"{name}: no audio (rc {rc}) — {Path(f'/tmp/cli_{name}.txt').read_text(errors='replace')[-300:]}"
+    mp3 = OUT / f"{name}.mp3"
+    sh(f"ffmpeg -v error -i '{found[0]}' -codec:a libmp3lame -b:a 320k '{mp3}' -y")
+    row = {"arm": "anchor", "seed": seed, "seconds": round(time.time()-t1), "reference": True}
+    stem = vocal_stem(mp3)
+    reg = M.classify_f0(M.finite_f0(M.f0_yin(*M.load(str(stem), mono=True)))) if stem else {}
+    row.update(register=reg.get("register"), lead_hz=reg.get("lead_hz"))
+    if reg.get("register") != "male":
+        row["kept"] = False
+        mp3.unlink(missing_ok=True)                 # not a male sample: it does not ship
+        print(f"  {name}: register {reg.get('register')} — DISCARDED · {row['seconds']}s", flush=True)
+    else:
+        row["kept"] = True; kept += 1
         try:
-            stem = vocal_stem(mp3)
-            reg = M.classify_f0(M.finite_f0(M.f0_yin(*M.load(str(stem), mono=True)))) if stem else {}
-            row.update(register=reg.get("register"), lead_hz=reg.get("lead_hz"))
             acc, heard = word_accuracy_fa(stem)
             row.update(words_fa=round(acc, 3), heard=heard)
             L = M.loudness(str(mp3)); row.update(lufs=L.get("lufs"), lra_lu=L.get("lra_lu"))
         except Exception as e:                        # disclosure must never kill the audition
             row["judge_error"] = str(e)[:200]
-        report.append(row)
-        (WORK / "audition.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
-        print(f"  {name}: register {row.get('register')} · lead {row.get('lead_hz')} Hz · "
-              f"words(fa) {row.get('words_fa')} · {row['seconds']}s", flush=True)
-        clock(f"{name} done")
+        print(f"  {name}: register male · lead {row.get('lead_hz')} Hz · "
+              f"words(fa) {row.get('words_fa')} · {row['seconds']}s · kept {kept}/{WANT}", flush=True)
+    report.append(row)
+    (WORK / "audition.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    clock(f"{name} done")
+assert kept >= 1, "no male take in %d tries" % MAX_TRIES
 (WORK / "caption.txt").write_text(CAPTION)
 (WORK / "lyrics_fa.txt").write_text(LYRICS, encoding="utf-8")
 print("AUDITION:", json.dumps(report, ensure_ascii=False), flush=True)

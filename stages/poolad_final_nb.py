@@ -33,27 +33,27 @@
 LYRICS = """[Intro]
 
 [Verse 1]
-ز آتش تنم زاد و از سنگِ سخت
-نه دستی مرا برد، نه بخشیده بخت
+به آتش زدندم، به سندان زدند
+نه دستی به یاری، نه بخشش، نه پند
 به هر ذرّه تیزی که دارم به لب
 بهایش شبی خون و رنج است و تب
 
 [Chorus]
 منم تیغِ پولاد و آتش به جان
 به هر روز و شب سوزدم در نهان
-خمم کن، بجَستم به پا استوار
+خمم کن، برآیم به پا استوار
 که پتک از همین رو کند کار و بار
 
 [Verse 2]
 به آبم فرو کن، شنو نعره‌ام
 ز دود و بخار آمدم سخت‌ترم
 لبم را به انگشتِ خود می‌بسای
-ز سالانِ آتش در آن مانده جای
+ز سالانِ آتش نشان مانده جای
 
 [Chorus]
 منم تیغِ پولاد و آتش به جان
 به هر روز و شب سوزدم در نهان
-خمم کن، بجَستم به پا استوار
+خمم کن، برآیم به پا استوار
 که پتک از همین رو کند کار و بار
 
 [Bridge]
@@ -73,36 +73,36 @@ LYRICS = """[Intro]
 [Chorus]
 منم تیغِ پولاد و آتش به جان
 به هر روز و شب سوزدم در نهان
-خمم کن، بجَستم به پا استوار
+خمم کن، برآیم به پا استوار
 که پتک از همین رو کند کار و بار
 
 [Outro]
 منم تیغِ پولاد و دیدم شرار
-به هر ضربه بالا شدم، استوار"""
+به هر ضربه بالاترم، بی‌شمار"""
 GLOSS = """[Intro]
 
 [Verse 1]
-From fire my body was born, and from hard stone.
-No hand carried me, and fortune gave nothing.
+They cast me into the fire; they beat me on the anvil.
+No hand came to help — no gift, no counsel.
 Every grain of sharpness I hold on my edge
 was paid for with a night of blood and toil and fever.
 
 [Chorus]
 I am the steel blade, with fire in my soul;
 every day and night it burns in me, unseen.
-Bend me — I have sprung back to my feet, steadfast:
+Bend me — I rise to my feet, steadfast:
 that is why the hammer does its work.
 
 [Verse 2]
 Plunge me into the water and hear my roar;
 out of the smoke and steam I came, harder.
 Rub my edge against your thumb —
-the years of fire have left their mark in it.
+the years of fire have left their mark on it.
 
 [Chorus]
 I am the steel blade, with fire in my soul;
 every day and night it burns in me, unseen.
-Bend me — I have sprung back to my feet, steadfast:
+Bend me — I rise to my feet, steadfast:
 that is why the hammer does its work.
 
 [Bridge]
@@ -122,12 +122,12 @@ you will turn to stone, and I go on.
 [Chorus]
 I am the steel blade, with fire in my soul;
 every day and night it burns in me, unseen.
-Bend me — I have sprung back to my feet, steadfast:
+Bend me — I rise to my feet, steadfast:
 that is why the hammer does its work.
 
 [Outro]
 I am the steel blade, and I have met the flame.
-With every strike I rose higher, steadfast."""
+With every strike I stand higher, beyond count."""
 for _fa, _en in zip(LYRICS.splitlines(), GLOSS.splitlines()):
     print(f"{_fa:<44}  {_en}" if not _fa.startswith("[") else _fa)
 
