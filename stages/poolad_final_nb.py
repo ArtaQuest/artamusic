@@ -1,15 +1,14 @@
 # %% [markdown]
-# # پولاد — the Persian STEEL, end to end in one notebook
+# # فولاد — the Persian STEEL, end to end in one notebook
 #
-# The STEEL record, sung in Persian: the lyric rewritten as epic verse in the Shahnameh's own
-# metre, rendered by the same model at the same settings as the English record with the vocal
+# The STEEL record, sung in Persian: the lyric rewritten in everyday Tehran Persian, rendered by the same model at the same settings as the English record with the vocal
 # language switched, and mastered here to web loudness with every claim measured on the bytes
 # this notebook ships. Everything a reader needs is IN this document: the lyric is printed below
 # as text with a literal English gloss, the measuring instruments are inlined verbatim (each
 # proves itself with its own selftest before it is trusted), and the two generated inputs are
 # PUBLIC Kaggle notebooks mounted as data sources, linked in the provenance block:
 #
-#   * the song take: https://www.kaggle.com/code/ashraasn/poolad-audition — the exact audio the
+#   * the song take: https://www.kaggle.com/code/ashranet/poolad-audition — the exact audio the
 #     author approved by ear (every knob shown there: ACE-Step 1.5 XL sft at a pinned commit,
 #     the 1.7B structure planner, shift 1.0, 80 ODE steps, guidance 7.5, vocal language fa);
 #   * the cover: https://www.kaggle.com/code/artafather/steel-record-final — the LEGO forge loop
@@ -23,111 +22,111 @@
 # %% [markdown]
 # ## The lyric
 #
-# Thirty sung lines in **بحر متقارب مثمن محذوف** — fa'ūlun fa'ūlun fa'ūlun fa'ul, the metre of the
-# Shahnameh and a march by construction — in rhymed couplets, the same section structure as the
-# English record. The steel itself sings, in the diction of the epic: پولاد، تیغ، پتک، کرنا،
-# دهل، زنگار. The gloss beside each line is literal, for readers without Persian; it is not the
-# English lyric.
+# Thirty sung lines in everyday Tehran Persian — spoken forms (آتیش، می‌شم، منو), short lines on a
+# four-beat pulse, exact colloquial rhymes — the same section structure and the same story as the
+# English record, couplet for couplet. A first draft in the Shahnameh's classical metre was
+# retired after the author heard it: the metre forced ancient words that did not sing. The gloss
+# beside each line is literal, for readers without Persian; it is not the English lyric.
 
 # %%
 LYRICS = """[Intro]
 
 [Verse 1]
-به آتش زدندم، به سندان زدند
-نه دستی به یاری، نه بخشش، نه پند
-به هر ذرّه تیزی که دارم به لب
-بهایش شبی خون و رنج است و تب
+تو آتیش به دنیا اومدم
+رو سندون با پتک قد کشیدم
+هیچ‌کس دست منو نگرفت
+همه‌ی زخمام منو کرد سفت
 
 [Chorus]
-منم تیغِ پولاد و آتش به جان
-به هر روز و شب سوزدم در نهان
-خمم کن، برآیم به پا استوار
-که پتک از همین رو کند کار و بار
+منم فولاد، آتیش تو خونمه
+هر روز و شب، همین‌جا، تو جونمه
+خم که بشم، دوباره پا می‌شم
+کار پتک همینه، خرد نمی‌شم
 
 [Verse 2]
-به آبم فرو کن، شنو نعره‌ام
-ز دود و بخار آمدم سخت‌ترم
-لبم را به انگشتِ خود می‌بسای
-ز سالانِ آتش نشان مانده جای
+بنداز منو تو آب، بشنو صدام
+از تو بخار، سخت‌تر می‌آم
+لبه‌مو بذار رو انگشتت، ببین
+سال‌ها آتیش کرده تیزش، همین
 
 [Chorus]
-منم تیغِ پولاد و آتش به جان
-به هر روز و شب سوزدم در نهان
-خمم کن، برآیم به پا استوار
-که پتک از همین رو کند کار و بار
+منم فولاد، آتیش تو خونمه
+هر روز و شب، همین‌جا، تو جونمه
+خم که بشم، دوباره پا می‌شم
+کار پتک همینه، خرد نمی‌شم
 
 [Bridge]
-چو تیغی بخسبد، به زنگار رود
-شه و تاج و تختش به خاکی شود
-چو کارم سرآید، مرا زنگ خورَد
-ولی پیش از آن نی، که کارم بُوَد
+تیغی که بمونه، زنگ می‌گیره
+شاه با تاج و تختش هم می‌میره
+کار که تموم شد، زنگ منو ببره
+قبل تموم شدن، حق نداره
 
 [Instrumental Break]
 
 [Verse 3]
-چو کرنا دمد، تیغِ من برکشید
-مرا بهرِ دستی که هرگز ندید
-به کف دسته‌ام را بسای و بِبَر
-تو سنگی شوی و منم درگذر
+وقتی شیپور می‌زنن، منو بکش
+مال دستایی که ندیدمش
+دسته‌مو تو دستت صاف کن، ببر
+تو سنگ می‌شی، من می‌رم جلوتر
 
 [Chorus]
-منم تیغِ پولاد و آتش به جان
-به هر روز و شب سوزدم در نهان
-خمم کن، برآیم به پا استوار
-که پتک از همین رو کند کار و بار
+منم فولاد، آتیش تو خونمه
+هر روز و شب، همین‌جا، تو جونمه
+خم که بشم، دوباره پا می‌شم
+کار پتک همینه، خرد نمی‌شم
 
 [Outro]
-منم تیغِ پولاد و دیدم شرار
-به هر ضربه بالاترم، بی‌شمار"""
+منم فولاد، آتیشو دیدم
+با هر ضربه، بالاتر رسیدم"""
 GLOSS = """[Intro]
 
 [Verse 1]
-They cast me into the fire; they beat me on the anvil.
-No hand came to help — no gift, no counsel.
-Every grain of sharpness I hold on my edge
-was paid for with a night of blood and toil and fever.
+I came into this world in the fire.
+On the anvil, under the hammer, I grew up.
+Nobody ever held my hand;
+every wound I got made me hard.
 
 [Chorus]
-I am the steel blade, with fire in my soul;
-every day and night it burns in me, unseen.
-Bend me — I rise to my feet, steadfast:
-that is why the hammer does its work.
+I am steel — the fire is in my blood,
+day and night, right here, in my soul.
+Bend me, and I stand up again;
+that's the hammer's job — I don't shatter.
 
 [Verse 2]
-Plunge me into the water and hear my roar;
-out of the smoke and steam I came, harder.
-Rub my edge against your thumb —
-the years of fire have left their mark on it.
+Throw me in the water and hear me cry;
+out of the steam I come back harder.
+Put my edge on your thumb and see —
+years of fire made it sharp, that's all.
 
 [Chorus]
-I am the steel blade, with fire in my soul;
-every day and night it burns in me, unseen.
-Bend me — I rise to my feet, steadfast:
-that is why the hammer does its work.
+I am steel — the fire is in my blood,
+day and night, right here, in my soul.
+Bend me, and I stand up again;
+that's the hammer's job — I don't shatter.
 
 [Bridge]
-A blade that sleeps goes to rust;
-the king, his crown and his throne turn to dust.
-When my work is over, let rust eat me —
-but not before, while my work remains.
+A blade that sits still gets rust;
+even the king with his crown and throne dies.
+When the work is done, rust can take me —
+before it's finished, it has no right.
 
 [Instrumental Break]
 
 [Verse 3]
-When the horn sounds, draw my blade:
-I was made for a hand that has never seen me.
-Wear my hilt smooth in your palm and carry me —
-you will turn to stone, and I go on.
+When they sound the horn, draw me;
+I belong to hands I've never seen.
+Wear my handle smooth in your hand, carry me —
+you'll turn to stone; I go on further.
 
 [Chorus]
-I am the steel blade, with fire in my soul;
-every day and night it burns in me, unseen.
-Bend me — I rise to my feet, steadfast:
-that is why the hammer does its work.
+I am steel — the fire is in my blood,
+day and night, right here, in my soul.
+Bend me, and I stand up again;
+that's the hammer's job — I don't shatter.
 
 [Outro]
-I am the steel blade, and I have met the flame.
-With every strike I stand higher, beyond count."""
+I am steel; I have seen the fire.
+With every blow, I reached higher."""
 for _fa, _en in zip(LYRICS.splitlines(), GLOSS.splitlines()):
     print(f"{_fa:<44}  {_en}" if not _fa.startswith("[") else _fa)
 
@@ -952,10 +951,10 @@ def clock(w): print(f"  ⏱ {w} · t+{(time.time()-T0)/60:.1f} min", flush=True)
 # Set on approval, from the audition's own measurements: the take the author chose by ear, and
 # the Persian word floor calibrated on that take (the English floor, 0.62, was calibrated on the
 # English take and says nothing about a Persian transcript).
-TAKE_NAME = "anchor6002"
+TAKE_NAME = "caption6002"
 WORDS_FLOOR = 0.62
 PROVENANCE = {
-    "song_take": f"https://www.kaggle.com/code/ashraasn/poolad-audition ({TAKE_NAME})",
+    "song_take": f"https://www.kaggle.com/code/ashranet/poolad-audition ({TAKE_NAME})",
     "cover":     "https://www.kaggle.com/code/artafather/steel-record-final",
     "tools":     "https://github.com/ArtaQuest/artamusic @ 199535aa (inlined above, verbatim)",
 }
@@ -964,14 +963,14 @@ sh("pip install -q demucs faster-whisper pyloudnorm soundfile 2>&1 | tail -1")
 clock("installed")
 
 TAKE = next(Path("/kaggle/input").rglob(f"*{TAKE_NAME}.mp3"), None)
-assert TAKE, "approved take not mounted (kernel source ashraasn/poolad-audition)"
+assert TAKE, "approved take not mounted (kernel source ashranet/poolad-audition)"
 COVER_DIR = None
 for p in Path("/kaggle/input").rglob("STEEL_cover_loop.mp4"):
     COVER_DIR = p.parent; break
 assert COVER_DIR, "cover not mounted (kernel source artafather/steel-record-final)"
 print(f"take: {TAKE}\ncover: {COVER_DIR}", flush=True)
-(OUT / "POOLAD_lyrics_fa.txt").write_text(LYRICS + "\n", encoding="utf-8")
-(OUT / "POOLAD_lyrics_gloss_en.txt").write_text(GLOSS + "\n", encoding="utf-8")
+(OUT / "FOOLAD_lyrics_fa.txt").write_text(LYRICS + "\n", encoding="utf-8")
+(OUT / "FOOLAD_lyrics_gloss_en.txt").write_text(GLOSS + "\n", encoding="utf-8")
 clock("inputs proven")
 
 # %%
@@ -1090,7 +1089,7 @@ for tgt in LADDER:
 best = next((n for n in scores if scores[n]["cost_pts"] <= 3.0),
             min(scores, key=lambda n: scores[n]["cost_pts"]))
 assert scores[best]["cost_pts"] <= 5.0, f"every master damaged the take: {scores}"
-wav, mp3 = OUT/"POOLAD.wav", OUT/"POOLAD.mp3"
+wav, mp3 = OUT/"FOOLAD.wav", OUT/"FOOLAD.mp3"
 shutil.copy(arms[best]["wav"], wav); shutil.copy(arms[best]["mp3"], mp3)
 for n in arms:
     Path(arms[n]["wav"]).unlink(missing_ok=True)
@@ -1103,13 +1102,13 @@ clock("mastered loud")
 for f in ("STEEL_cover_loop.mp4","STEEL_cover_loop.webm","STEEL_cover_loop_1080.webm",
           "cover_3000.png","loop_sheet.jpg","loop_seam.jpg"):
     src = COVER_DIR / f
-    if src.exists(): shutil.copy(src, OUT / f.replace("STEEL_", "POOLAD_"))
+    if src.exists(): shutil.copy(src, OUT / f.replace("STEEL_", "FOOLAD_"))
 song_seconds = float(subprocess.run(
     ["ffprobe","-v","error","-show_entries","format=duration","-of","csv=p=0",str(wav)],
     text=True, capture_output=True).stdout.strip() or 180.0)
-sh(f"ffmpeg -v error -stream_loop -1 -i '{OUT}/POOLAD_cover_loop.mp4' -i '{wav}' "
+sh(f"ffmpeg -v error -stream_loop -1 -i '{OUT}/FOOLAD_cover_loop.mp4' -i '{wav}' "
    f"-vf scale=1080:1080:flags=lanczos,format=yuv420p -c:v libx264 -preset slow -crf 20 "
-   f"-c:a aac -b:a 256k -t {song_seconds:.3f} -movflags +faststart '{OUT}/POOLAD_cover_video.mp4' -y")
+   f"-c:a aac -b:a 256k -t {song_seconds:.3f} -movflags +faststart '{OUT}/FOOLAD_cover_video.mp4' -y")
 clock("cover assembled")
 
 # %%
