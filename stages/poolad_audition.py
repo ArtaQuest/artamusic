@@ -101,11 +101,16 @@ clock("inputs ready")
 # %%
 sys.path.insert(0, str(REPO))
 import toml
-from huggingface_hub import snapshot_download
 # The structure planner must be ON DISK and NAMED: absent, the CLI returns 0, prints
-# "5Hz LM not initialized" and writes no audio.
-snapshot_download(f"ACE-Step/{PINS['planner']}", local_dir=str(CKPT / PINS["planner"]))
-assert (CKPT / PINS["planner"] / "config.json").exists(), "planner not on disk"
+# "5Hz LM not initialized" and writes no audio. The 1.7B is NOT a repository of its own on the
+# Hub (a snapshot_download of ACE-Step/acestep-5Hz-lm-1.7B answers 401 — one dead run); it is a
+# COMPONENT of the main bundle ACE-Step/Ace-Step1.5, so the model's own downloader fetches it,
+# and the XL DiT is a sub-model fetched the same way. Both are asserted on disk before a render.
+from acestep.model_downloader import download_main_model, download_submodel
+ok, msg = download_main_model(checkpoints_dir=CKPT); print(msg, flush=True); assert ok, msg
+ok, msg = download_submodel(PINS["song_model"], checkpoints_dir=CKPT); print(msg, flush=True); assert ok, msg
+assert (CKPT / PINS["planner"] / "config.json").exists(), f"planner not on disk under {CKPT}"
+assert (CKPT / PINS["song_model"]).exists(), "XL DiT not on disk"
 print(f"cuda devices {torch.cuda.device_count()} "
       f"{[torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]} · "
       f"{torch.cuda.get_device_properties(0).total_memory/2**30:.1f} GiB on device 0", flush=True)
