@@ -8,7 +8,7 @@
 # proves itself with its own selftest before it is trusted), and the two generated inputs are
 # PUBLIC Kaggle notebooks mounted as data sources, linked in the provenance block:
 #
-#   * the song take: https://www.kaggle.com/code/ashranet/poolad-audition — the exact audio the
+#   * the song take: https://www.kaggle.com/code/ashranet/foolad-audition — the exact audio the
 #     author approved by ear (every knob shown there: ACE-Step 1.5 XL sft at a pinned commit,
 #     the 1.7B structure planner, shift 1.0, 80 ODE steps, guidance 7.5, vocal language fa);
 #   * the cover: https://www.kaggle.com/code/artafather/steel-record-final — the LEGO forge loop
@@ -32,101 +32,101 @@
 LYRICS = """[Intro]
 
 [Verse 1]
-تو آتیش به دنیا اومدم
-رو سندون با پتک قد کشیدم
-هیچ‌کس دست منو نگرفت
-همه‌ی زخمام منو کرد سفت
+تو کوره به دنیا اومدم
+زیر پتک، آب‌دیده شدم
+هیچ‌کی رو پشت سرم ندیدم
+هر چی دارم، با خون خریدم
 
 [Chorus]
-منم فولاد، آتیش تو خونمه
-هر روز و شب، همین‌جا، تو جونمه
-خم که بشم، دوباره پا می‌شم
-کار پتک همینه، خرد نمی‌شم
+من فولادم، آتیش تو خونمه
+روز و شب، همین آتیش تو جونمه
+خم بشم، دوباره بلند می‌شم
+پتک واسه همینه، خرد نمی‌شم
 
 [Verse 2]
-بنداز منو تو آب، بشنو صدام
-از تو بخار، سخت‌تر می‌آم
-لبه‌مو بذار رو انگشتت، ببین
-سال‌ها آتیش کرده تیزش، همین
+بندازم تو آب، گوش کن به صدام
+از تو بخار، محکم‌تر می‌آم
+با انگشت لبه‌مو تست کن، ببین
+واسه این تیزی، سال‌ها سوختم، همین
 
 [Chorus]
-منم فولاد، آتیش تو خونمه
-هر روز و شب، همین‌جا، تو جونمه
-خم که بشم، دوباره پا می‌شم
-کار پتک همینه، خرد نمی‌شم
+من فولادم، آتیش تو خونمه
+روز و شب، همین آتیش تو جونمه
+خم بشم، دوباره بلند می‌شم
+پتک واسه همینه، خرد نمی‌شم
 
 [Bridge]
-تیغی که بمونه، زنگ می‌گیره
-شاه با تاج و تختش هم می‌میره
+تیغ که بی‌کار بمونه، زنگ می‌گیره
+شاه هم با تاج و تختش می‌میره
 کار که تموم شد، زنگ منو ببره
-قبل تموم شدن، حق نداره
+تا تموم نشده، حق نداره
 
 [Instrumental Break]
 
 [Verse 3]
-وقتی شیپور می‌زنن، منو بکش
-مال دستایی که ندیدمش
-دسته‌مو تو دستت صاف کن، ببر
+شیپور که زدن، منو بکش بیرون
+مال دستاییم که ندیدمشون
+دسته‌مو صاف کن، منو ببر
 تو سنگ می‌شی، من می‌رم جلوتر
 
 [Chorus]
-منم فولاد، آتیش تو خونمه
-هر روز و شب، همین‌جا، تو جونمه
-خم که بشم، دوباره پا می‌شم
-کار پتک همینه، خرد نمی‌شم
+من فولادم، آتیش تو خونمه
+روز و شب، همین آتیش تو جونمه
+خم بشم، دوباره بلند می‌شم
+پتک واسه همینه، خرد نمی‌شم
 
 [Outro]
-منم فولاد، آتیشو دیدم
+من فولادم، آتیشو دیدم
 با هر ضربه، بالاتر رسیدم"""
 GLOSS = """[Intro]
 
 [Verse 1]
-I came into this world in the fire.
-On the anvil, under the hammer, I grew up.
-Nobody ever held my hand;
-every wound I got made me hard.
+I was born in the furnace.
+Under the hammer I got tempered.
+I never saw anyone behind me;
+everything I have, I bought with blood.
 
 [Chorus]
-I am steel — the fire is in my blood,
-day and night, right here, in my soul.
-Bend me, and I stand up again;
-that's the hammer's job — I don't shatter.
+I'm steel — the fire's in my blood;
+day and night, that same fire's in my soul.
+If I bend, I get back up again;
+that's what the hammer's for — I don't shatter.
 
 [Verse 2]
-Throw me in the water and hear me cry;
-out of the steam I come back harder.
-Put my edge on your thumb and see —
-years of fire made it sharp, that's all.
+Throw me in the water, listen to my voice;
+out of the steam I come back stronger.
+Test my edge with your finger, look —
+for this sharpness I burned for years, that's all.
 
 [Chorus]
-I am steel — the fire is in my blood,
-day and night, right here, in my soul.
-Bend me, and I stand up again;
-that's the hammer's job — I don't shatter.
+I'm steel — the fire's in my blood;
+day and night, that same fire's in my soul.
+If I bend, I get back up again;
+that's what the hammer's for — I don't shatter.
 
 [Bridge]
-A blade that sits still gets rust;
-even the king with his crown and throne dies.
-When the work is done, rust can take me —
-before it's finished, it has no right.
+A blade that sits idle gets rusty;
+even the king dies with his crown and throne.
+When the work is done, let rust take me —
+until it's done, it has no right.
 
 [Instrumental Break]
 
 [Verse 3]
-When they sound the horn, draw me;
+When they sound the horn, pull me out;
 I belong to hands I've never seen.
-Wear my handle smooth in your hand, carry me —
-you'll turn to stone; I go on further.
+Wear my handle smooth, carry me —
+you'll turn to stone; I'll keep going.
 
 [Chorus]
-I am steel — the fire is in my blood,
-day and night, right here, in my soul.
-Bend me, and I stand up again;
-that's the hammer's job — I don't shatter.
+I'm steel — the fire's in my blood;
+day and night, that same fire's in my soul.
+If I bend, I get back up again;
+that's what the hammer's for — I don't shatter.
 
 [Outro]
-I am steel; I have seen the fire.
-With every blow, I reached higher."""
+I'm steel; I've seen the fire.
+With every blow, I got higher."""
 for _fa, _en in zip(LYRICS.splitlines(), GLOSS.splitlines()):
     print(f"{_fa:<44}  {_en}" if not _fa.startswith("[") else _fa)
 
@@ -954,7 +954,7 @@ def clock(w): print(f"  ⏱ {w} · t+{(time.time()-T0)/60:.1f} min", flush=True)
 TAKE_NAME = "caption6002"
 WORDS_FLOOR = 0.62
 PROVENANCE = {
-    "song_take": f"https://www.kaggle.com/code/ashranet/poolad-audition ({TAKE_NAME})",
+    "song_take": f"https://www.kaggle.com/code/ashranet/foolad-audition ({TAKE_NAME})",
     "cover":     "https://www.kaggle.com/code/artafather/steel-record-final",
     "tools":     "https://github.com/ArtaQuest/artamusic @ 199535aa (inlined above, verbatim)",
 }
@@ -963,7 +963,7 @@ sh("pip install -q demucs faster-whisper pyloudnorm soundfile 2>&1 | tail -1")
 clock("installed")
 
 TAKE = next(Path("/kaggle/input").rglob(f"*{TAKE_NAME}.mp3"), None)
-assert TAKE, "approved take not mounted (kernel source ashranet/poolad-audition)"
+assert TAKE, "approved take not mounted (kernel source ashranet/foolad-audition)"
 COVER_DIR = None
 for p in Path("/kaggle/input").rglob("STEEL_cover_loop.mp4"):
     COVER_DIR = p.parent; break

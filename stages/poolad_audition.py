@@ -32,7 +32,7 @@ PINS = {
     "song_model": "acestep-v15-xl-sft",
     "planner": "acestep-5Hz-lm-1.7B",   # the approved take's planner (ACE-Step's default); the 4B does not fit a T4 beside the XL
     "measure_sha": "199535aa517324d8021667b5a34a799aedd19353",     # ArtaQuest/artamusic lib/measure.py
-    "lyric_sha": "d739c92073c61e4bf38bd66417eb9150c733d66c",   # ArtaQuest/artamusic song/lyrics_foolad_fa.txt
+    "lyric_sha": "42955650218a26ce4f955c71849b7c1140177f4c",   # ArtaQuest/artamusic song/lyrics_foolad_fa.txt
     "torch_pascal": "2.7.1", "cuda_line_pascal": "cu126",
     "asr": "large-v3",
 }
@@ -79,7 +79,7 @@ import numpy as np, torch
 a = torch.randn(256, 256, device="cuda"); assert torch.isfinite(a @ a).all(), "CUDA matmul failed — wrong torch for this card"
 import measure as M
 LYRICS = Path("/tmp/lyrics_fa.txt").read_text(encoding="utf-8").strip()
-assert LYRICS.startswith("[Intro]") and "منم فولاد" in LYRICS, "wrong lyric at pin"
+assert LYRICS.startswith("[Intro]") and "من فولادم" in LYRICS, "wrong lyric at pin"
 _ref = sorted(Path("/kaggle/input").rglob("STEEL.mp3"))
 assert _ref, "the STEEL lead is not mounted (kernel source artafather/steel-record-final)"
 MALE_REF = str(_ref[0])
