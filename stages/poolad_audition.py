@@ -42,11 +42,13 @@ os.environ.update(HF_HOME=str(TMP/"hf"), HF_HUB_ENABLE_HF_TRANSFER="1",
                   PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True",
                   PYTORCH_ALLOC_CONF="expandable_segments:True")
 PY = sys.executable   # `pip` on PATH is a different interpreter from the one running this notebook
-sh(f"{PY} -c 'import torch; print(\"card:\", torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0))'")
-import torch as _t0
-CAP = float("%d.%d" % _t0.cuda.get_device_capability(0)) if _t0.cuda.is_available() else 0.0
+# The card is read in a SUBPROCESS: importing torch here, before the installs, would pin this
+# notebook to Kaggle's stock build and the cu126 line below would never be what runs (a v1 death).
+_probe = subprocess.run([PY, "-c", "import torch; c=torch.cuda.get_device_capability(0) if torch.cuda.is_available() else (0,0); "
+                         "print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'cpu'); print('%d.%d' % c)"],
+                        capture_output=True, text=True, check=True).stdout.split()
+CAP = float(_probe[-1]); print("card:", " ".join(_probe[:-1]), CAP, flush=True)
 PASCAL = 0 < CAP < 7.0
-del _t0
 
 if not REPO.exists():
     sh(f"git clone https://github.com/ACE-Step/ACE-Step-1.5.git {REPO}", quiet=True)
