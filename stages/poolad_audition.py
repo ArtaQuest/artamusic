@@ -11,13 +11,16 @@
 # | A `anchor` | the published STEEL lead as `reference_audio` | the reference is what held the male register 22/22 times when tags alone did not; it also carries the march |
 # | B `caption` | caption only | the register lottery, but the arrangement is free to be Persian |
 #
-# Model: ACE-Step 1.5 XL (4.6B, sft) at the pinned commit with the 4B structure planner — the
-# newest weights on the ACE-Step org (the later "-diffusers" entries are format ports). The
-# settings are the production record's, not the CLI's defaults: shift 1.0 (the CLI hardcodes the
-# turbo 3.0), thinking on, 80 ODE steps, guidance 7.5, timesignature "4".
+# Model: ACE-Step 1.5 XL (4.6B, sft) at the pinned commit with the 1.7B structure planner — the
+# newest weights on the ACE-Step org (the later "-diffusers" entries are format ports), and the
+# exact planner the approved STEEL take was rendered with (the audition never named one, so the
+# CLI's default 1.7B did the planning). The 4B planner was tried first and MEASURED out: on the
+# 14.56 GiB T4 it loaded and then went CUDA out-of-memory beside the XL DiT on every rung.
+# The settings are the production record's, not the CLI's defaults: shift 1.0 (the CLI hardcodes
+# the turbo 3.0), thinking on, 80 ODE steps, guidance 7.5, timesignature "4".
 
 # %%
-import json, os, re, subprocess, sys, time, shutil
+import json, os, re, subprocess, sys, time
 from pathlib import Path
 T0 = time.time()
 def sh(c, quiet=False): subprocess.run(c, shell=True, check=True,
@@ -27,7 +30,7 @@ def clock(w): print(f"  ⏱ {w} · t+{(time.time()-T0)/60:.1f} min", flush=True)
 PINS = {
     "ace_step_code": "6d467e4b5081ccb0abf1ec1bf4fdf9051a2d34b0",   # github.com/ACE-Step/ACE-Step-1.5
     "song_model": "acestep-v15-xl-sft",
-    "planner": "acestep-5Hz-lm-4B",
+    "planner": "acestep-5Hz-lm-1.7B",   # the approved take's planner (ACE-Step's default); the 4B does not fit a T4 beside the XL
     "measure_sha": "199535aa517324d8021667b5a34a799aedd19353",     # ArtaQuest/artamusic lib/measure.py
     "lyric_sha": "5f335210565f25188058b82f4d493c3db965163d",                            # ArtaQuest/artamusic song/lyrics_poolad_fa.txt
     "torch_pascal": "2.7.1", "cuda_line_pascal": "cu126",
@@ -100,12 +103,12 @@ sys.path.insert(0, str(REPO))
 import toml
 from huggingface_hub import snapshot_download
 # The structure planner must be ON DISK and NAMED: absent, the CLI returns 0, prints
-# "5Hz LM not initialized" and writes no audio. The 4B is the production record's planner.
+# "5Hz LM not initialized" and writes no audio.
 snapshot_download(f"ACE-Step/{PINS['planner']}", local_dir=str(CKPT / PINS["planner"]))
-_small = CKPT / "acestep-5Hz-lm-0.6B"
-if _small.exists():
-    shutil.move(str(_small), str(TMP / "lm-0.6B-parked"))
-assert (CKPT / PINS["planner"]).exists(), "planner not on disk"
+assert (CKPT / PINS["planner"] / "config.json").exists(), "planner not on disk"
+print(f"cuda devices {torch.cuda.device_count()} "
+      f"{[torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]} · "
+      f"{torch.cuda.get_device_properties(0).total_memory/2**30:.1f} GiB on device 0", flush=True)
 clock("planner on disk")
 
 # ACE-Step picks fp16 on any card without bf16 hardware, and fp16 overflows to NaN in the 4.6B
