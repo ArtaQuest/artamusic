@@ -34,67 +34,67 @@ LYRICS = """[Intro]
 [Verse 1]
 تو کوره به دنیا اومدم
 زیر چکش، آب‌دیده شدم
-هیچ‌کی رو پشت سرم ندیدم
-هر چی دارم، با خون خریدم
+دستِ کمکِ هیچ‌کس رو ندیدم
+هر چی دارم، با خونِ دل خریدم
 
 [Chorus]
 من فولادم، آتیش تو خونمه
 روز و شب، همین آتیش تو جونمه
 خم بشم، دوباره بلند می‌شم
-چکش واسه همینه، خرد نمی‌شم
+چکش بزن، من خرد نمی‌شم
 
 [Verse 2]
 بندازم تو آب، گوش کن به صدام
-از تو بخار، محکم‌تر می‌آم
-با انگشت لبه‌مو تست کن، ببین
+از تو بخار، محکم‌تر در می‌آم
+با انگشتت لبه‌مو تست کن، ببین
 واسه این تیزی، سال‌ها سوختم، همین
 
 [Chorus]
 من فولادم، آتیش تو خونمه
 روز و شب، همین آتیش تو جونمه
 خم بشم، دوباره بلند می‌شم
-چکش واسه همینه، خرد نمی‌شم
+چکش بزن، من خرد نمی‌شم
 
 [Bridge]
 تیغ که بی‌کار بمونه، زنگ می‌گیره
 شاه هم با تاج و تختش می‌میره
-کار که تموم شد، زنگ منو ببره
-تا تموم نشده، حق نداره
+زنگ بزنم، وقتی کارم تمومه
+تا کارم مونده، زنگ زدن حرومه
 
 [Instrumental Break]
 
 [Verse 3]
 شیپور که زدن، منو بکش بیرون
-مال دستاییم که ندیدمشون
-دسته‌مو صاف کن، منو ببر
-تو سنگ می‌شی، من می‌رم جلوتر
+مال دستایی‌ام که ندیدمشون
+اونقدر بگیرم که دسته‌م صاف بشه
+تو سنگ می‌شی، راهم تموم نمی‌شه
 
 [Chorus]
 من فولادم، آتیش تو خونمه
 روز و شب، همین آتیش تو جونمه
 خم بشم، دوباره بلند می‌شم
-چکش واسه همینه، خرد نمی‌شم
+چکش بزن، من خرد نمی‌شم
 
 [Outro]
 من فولادم، آتیشو دیدم
-با هر ضربه، بالاتر رسیدم"""
+با هر ضربه، بالاتر پریدم"""
 GLOSS = """[Intro]
 
 [Verse 1]
 I was born in the furnace.
-Under the hammer I got tempered.
-I never saw anyone behind me;
-everything I have, I bought with blood.
+Under the hammer, I got tempered.
+I never saw anyone's helping hand;
+everything I have, I paid for in heart's blood.
 
 [Chorus]
 I'm steel — the fire's in my blood;
 day and night, that same fire's in my soul.
 If I bend, I get back up again;
-that's what the hammer's for — I don't shatter.
+swing the hammer — I don't shatter.
 
 [Verse 2]
 Throw me in the water, listen to my voice;
-out of the steam I come back stronger.
+out of the steam I come out stronger.
 Test my edge with your finger, look —
 for this sharpness I burned for years, that's all.
 
@@ -102,31 +102,31 @@ for this sharpness I burned for years, that's all.
 I'm steel — the fire's in my blood;
 day and night, that same fire's in my soul.
 If I bend, I get back up again;
-that's what the hammer's for — I don't shatter.
+swing the hammer — I don't shatter.
 
 [Bridge]
 A blade that sits idle gets rusty;
 even the king dies with his crown and throne.
-When the work is done, let rust take me —
-until it's done, it has no right.
+I'll rust when my work is done —
+while my work remains, rusting is off-limits.
 
 [Instrumental Break]
 
 [Verse 3]
 When they sound the horn, pull me out;
 I belong to hands I've never seen.
-Wear my handle smooth, carry me —
-you'll turn to stone; I'll keep going.
+Hold me so long that my handle wears smooth —
+you'll turn to stone; my road doesn't end.
 
 [Chorus]
 I'm steel — the fire's in my blood;
 day and night, that same fire's in my soul.
 If I bend, I get back up again;
-that's what the hammer's for — I don't shatter.
+swing the hammer — I don't shatter.
 
 [Outro]
 I'm steel; I've seen the fire.
-With every blow, I got higher."""
+With every blow, I jumped higher."""
 for _fa, _en in zip(LYRICS.splitlines(), GLOSS.splitlines()):
     print(f"{_fa:<44}  {_en}" if not _fa.startswith("[") else _fa)
 
