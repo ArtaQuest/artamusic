@@ -21,8 +21,11 @@ def owner():
     and the push still reports success. The credential itself lives only in ~/.kaggle/kaggle.json
     and must never be committed: this repo is public.
     """
-    import json as _j
-    return _j.loads((Path.home() / ".kaggle/kaggle.json").read_text())["username"]
+    # The SAME file the kaggle package will authenticate from — so KAGGLE_CONFIG_DIR is honoured
+    # here too. Reading ~/.kaggle/kaggle.json unconditionally named one account in the kernel ref
+    # while the API spoke as another the moment the env var was set (a status poll that ArtaSwitch
+    # rotated out from under: 'Permission kernels.get was denied' on a kernel that does not exist).
+    return whoami_file()
 
 # ── Kaggle API rate limiting ─────────────────────────────────────────────────────────────
 # Kaggle does not publish its exact limits, and a throttled or blocked key is a much more

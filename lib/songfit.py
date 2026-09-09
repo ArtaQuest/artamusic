@@ -76,7 +76,10 @@ def words(lyric, keep_parentheticals=True):
     body = "\n".join(l for t, b in sections(lyric) for l in b) or lyric
     if not keep_parentheticals:
         body = _PAREN.sub(" ", body)
-    return len(re.findall(r"[A-Za-z0-9']+", body))
+    # Any script, not just Latin: \w is Unicode-aware, and a zero-width non-joiner (U+200C)
+    # binds a Persian compound ("نعره‌ام") into ONE sung word rather than two. The Latin-only
+    # pattern this replaces counted a thirty-line Persian lyric as zero words and refused it.
+    return len([w for w in re.findall(r"[\w\u200c']+", body) if re.search(r"\w", w)])
 
 
 def measure(lyric, duration_s, bpm, voiced_seconds=None, beats_per_bar=4):
@@ -220,6 +223,12 @@ def selftest():
     print(f"   a lyric written to the clock     {mg['words']} words, "
           f"{mg['words_per_voiced_second']} w/s, {mg['sections']} sections -> "
           f"{'PASSED' if fits else 'REFUSED: ' + '; '.join(vg)}")
+
+    # Persian counts as words too — one lyric line of the epic metre, ZWNJ compounds bound.
+    fa = words("[verse]\nبه آبم فرو کن، شنو نعره‌ام")
+    fa_ok = fa == 6
+    ok &= fa_ok
+    print(f"   a Persian line counts its words   {fa} -> {'ok' if fa_ok else 'FAIL (expected 6)'}")
 
     # A parenthetical is SUNG. Counting it as free is how sixteen shouts hide from the gate.
     a = words("[verse]\n(Strike!) and the hammer falls.")
