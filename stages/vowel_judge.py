@@ -148,5 +148,77 @@ for take in TAKES:
     (WORK / "vowel_judge.json").write_text(json.dumps({"expected_mix": dict(Counter(EXP)), "takes": report}, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"  {take.stem}: a→a {row['a_as_a']} · a→e {row['a_as_e']} · o→o {row['o_as_o']} · o→e {row['o_as_e']} · e→e {row['e_as_e']} · ā→ā {row['A_as_A']} · {row['seconds']}s", flush=True)
     clock(f"{take.stem} judged")
+# %%
+# WORD-LEVEL PROBE. An aggregate over an 'a'-heavy text can pass while the words the operator
+# named fail. Each target word's expected phones (from its vowel-marked spelling) are located in
+# the heard phone stream by local alignment, and the vowels the singer produced at those slots
+# are read out — per occurrence, per take.
+CONS = {"چ": "tS", "ک": "k", "ش": "S", "م": "m", "خ": "x", "ر": "r", "د": "d", "ب": "b", "ل": "l",
+        "ت": "t", "ن": "n", "پ": "p", "ح": "h", "ه": "h", "ق": "q", "غ": "q", "ز": "z", "س": "s",
+        "ج": "dZ", "گ": "g", "ف": "f", "ع": "", "ص": "s", "ض": "z", "ط": "t", "ظ": "z", "ژ": "Z",
+        "ث": "s", "ذ": "z", "ی": "j", "و": "v"}
+def word_phones(word):
+    """Expected phone classes for one vowel-marked word: consonants by class, vowels a/e/o/A/i/u."""
+    out, chars = [], list(word)
+    for i, ch in enumerate(chars):
+        if ch in HARAKAT: out.append(HARAKAT[ch])
+        elif ch == "آ": out.append("A")
+        elif ch == "ا": out.append("A") if i > 0 else None
+        elif ch == "ی" and i > 0 and (i == len(chars)-1 or chars[i+1] not in HARAKAT): out.append("i")
+        elif ch == "و" and i > 0 and (i == len(chars)-1 or chars[i+1] not in HARAKAT): out.append("u")
+        elif ch in CONS and CONS[ch]: out.append(CONS[ch])
+    return out
+PHONE_CLASS = [("tʃ", "tS"), ("dʒ", "dZ"), ("ʃ", "S"), ("ʒ", "Z"), ("ɾ", "r"), ("r", "r"), ("ɢ", "q"), ("q", "q"),
+               ("ɣ", "q"), ("ɡ", "g"), ("g", "g"), ("x", "x"), ("χ", "x"), ("h", "h"), ("ħ", "h"), ("k", "k"),
+               ("m", "m"), ("n", "n"), ("d", "d"), ("b", "b"), ("l", "l"), ("t", "t"), ("p", "p"), ("z", "z"),
+               ("s", "s"), ("f", "f"), ("v", "v"), ("w", "v"), ("j", "j")] + VOWEL_CLASS
+def phone_class(p):
+    for pref, cls in PHONE_CLASS:
+        if p.startswith(pref): return cls
+    return None
+def locate(expected, heard_cls):
+    """Smith-Waterman on phone classes; returns the heard classes aligned to each expected slot."""
+    n, m = len(expected), len(heard_cls)
+    H = np.zeros((n+1, m+1), dtype=np.int32); best, bi, bj = 0, 0, 0
+    for i in range(1, n+1):
+        for j in range(1, m+1):
+            sc = 2 if expected[i-1] == heard_cls[j-1] else -1
+            H[i, j] = max(0, H[i-1, j-1] + sc, H[i-1, j] - 1, H[i, j-1] - 1)
+            if H[i, j] > best: best, bi, bj = H[i, j], i, j
+    if best < 2 * max(2, n // 2): return None, best
+    slots = ["-"] * n; i, j = bi, bj
+    while i > 0 and j > 0 and H[i, j] > 0:
+        sc = 2 if expected[i-1] == heard_cls[j-1] else -1
+        if H[i, j] == H[i-1, j-1] + sc: slots[i-1] = heard_cls[j-1]; i -= 1; j -= 1
+        elif H[i, j] == H[i-1, j] - 1: i -= 1
+        else: j -= 1
+    return slots, best
+TARGETS = ["چَکُش", "کُمَک", "خُرد", "بالاتَر", "شِیپور", "بُلَند", "مُحکَم", "دُنیا", "زَنگ", "فولادَم"]
+word_report = {}
+for take in TAKES:
+    stem = vocal_stem(take)
+    phones, _ = heard_vowels(stem)
+    heard_cls = [c for c in (phone_class(p) for p in phones) if c]
+    per = {}
+    for w in TARGETS:
+        exp = word_phones(w)
+        vslots = [k for k, c in enumerate(exp) if c in ("a", "e", "o", "A", "i", "u")]
+        found = []
+        stream = list(heard_cls)
+        for _ in range(4):                       # up to four occurrences per take
+            slots, score = locate(exp, stream)
+            if slots is None: break
+            found.append("".join(slots[k] if slots[k] in "aeoAiu" else "?" for k in vslots))
+            # blank out the located window so the next search finds another occurrence
+            idx = next((j for j in range(len(stream) - len(exp) + 1)
+                        if sum(1 for a_, b_ in zip(exp, stream[j:j+len(exp)]) if a_ == b_) >= max(2, len(exp)//2)), None)
+            if idx is None: break
+            stream = stream[:idx] + ["#"] * len(exp) + stream[idx+len(exp):]
+        per[w] = {"expected_vowels": "".join(exp[k] for k in vslots), "heard": found}
+    word_report[take.stem] = per
+    print(f"  {take.stem}: " + " · ".join(f"{w} {v['expected_vowels']}→{','.join(v['heard']) or '(not found)'}" for w, v in per.items()), flush=True)
+    clock(f"{take.stem} words")
+(WORK / "vowel_words.json").write_text(json.dumps(word_report, ensure_ascii=False, indent=1), encoding="utf-8")
+
 print("VOWELS:", json.dumps(report, ensure_ascii=False), flush=True)
 clock("DONE")
