@@ -4,7 +4,7 @@
 # The lyric of STEEL, rewritten in everyday Tehran Persian — spoken forms, short four-beat lines,
 # exact colloquial rhymes (the first draft's Shahnameh metre forced ancient words the operator
 # could not hear sung well) — by the same model at the production settings, vocal language fa.
-# Five takes from the seed they chose, so the operator can approve BY EAR before the production slot is spent.
+# Five takes — three vowel-marked, two Latin — so the operator can hear which form the model pronounces, before the production slot is spent.
 #
 # Caption only, by the operator's ear: audition 1's caption-only takes were the ones they liked
 # (caption6002 "was best"), and the four voices the instrument split male/female were all male
@@ -32,7 +32,7 @@ PINS = {
     "song_model": "acestep-v15-xl-sft",
     "planner": "acestep-5Hz-lm-1.7B",   # the approved take's planner (ACE-Step's default); the 4B does not fit a T4 beside the XL
     "measure_sha": "199535aa517324d8021667b5a34a799aedd19353",     # ArtaQuest/artamusic lib/measure.py
-    "lyric_sha": "862f9a419cb0f66c257b0312d583f1e121632d05",   # ArtaQuest/artamusic song/lyrics_foolad_fa.txt
+    "lyric_sha": "3e742ca16c3c26171551e18500d6061612f15188",   # ArtaQuest/artamusic song/lyrics_foolad_fa.txt
     "torch_pascal": "2.7.1", "cuda_line_pascal": "cu126",
     "asr": "large-v3",
 }
@@ -71,15 +71,21 @@ import urllib.request
 urllib.request.urlretrieve(
     f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['measure_sha']}/lib/measure.py",
     "/tmp/measure.py")
-urllib.request.urlretrieve(
-    f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['lyric_sha']}/song/lyrics_foolad_fa.txt",
-    "/tmp/lyrics_fa.txt")
+for _f, _to in (("lyrics_foolad_fa.txt", "/tmp/lyrics_fa.txt"),
+                ("lyrics_foolad_fa.vocalized.txt", "/tmp/lyrics_fa_voc.txt"),
+                ("lyrics_foolad_fa.latin.txt", "/tmp/lyrics_fa_lat.txt")):
+    urllib.request.urlretrieve(
+        f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['lyric_sha']}/song/{_f}", _to)
 sys.path.insert(0, "/tmp")
 import numpy as np, torch
 a = torch.randn(256, 256, device="cuda"); assert torch.isfinite(a @ a).all(), "CUDA matmul failed — wrong torch for this card"
 import measure as M
-LYRICS = Path("/tmp/lyrics_fa.txt").read_text(encoding="utf-8").strip()
+LYRICS = Path("/tmp/lyrics_fa.txt").read_text(encoding="utf-8").strip()          # plain: the judge's reference
+LYRICS_VOC = Path("/tmp/lyrics_fa_voc.txt").read_text(encoding="utf-8").strip()  # every short vowel written
+LYRICS_LAT = Path("/tmp/lyrics_fa_lat.txt").read_text(encoding="utf-8").strip()  # Latin transliteration
 assert LYRICS.startswith("[Intro]") and "من فولادم" in LYRICS, "wrong lyric at pin"
+assert re.sub(r"[ً-ْٰ]", "", LYRICS_VOC) == LYRICS, "the vocalized text must be the plain text plus marks"
+assert "Man fooladam" in LYRICS_LAT
 _ref = sorted(Path("/kaggle/input").rglob("STEEL.mp3"))
 assert _ref, "the STEEL lead is not mounted (kernel source artafather/steel-record-final)"
 MALE_REF = str(_ref[0])
@@ -138,13 +144,13 @@ assert OLD in src, "ACE-Step changed under its pin"
 orch.write_text(src.replace(OLD, NEW, 1))
 BF16 = torch.cuda.is_bf16_supported()
 
-def render_conf(name, seed, rung, steps, reference):
+def render_conf(name, seed, rung, steps, reference, lyrics):
     conf = {"project_root": str(REPO), "config_path": rung["model"], "checkpoint_dir": str(CKPT),
             "lm_model_path": PINS["planner"],
             "save_dir": str(TMP / f"out_{name}"), "audio_format": "flac", "device": "cuda",
             "offload_to_cpu": rung["offload_to_cpu"], "offload_dit_to_cpu": rung["offload_dit_to_cpu"],
             "task_type": "text2music",
-            "caption": CAPTION, "lyrics": LYRICS, "instrumental": False,
+            "caption": CAPTION, "lyrics": lyrics, "instrumental": False,
             "bpm": BPM, "keyscale": KEYSCALE, "timesignature": "4",
             "vocal_language": "fa",                      # constants.py VALID_LANGUAGES includes 'fa'
             "duration": DURATION, "inference_steps": steps, "guidance_scale": 7.5, "use_adg": False,
@@ -176,7 +182,7 @@ LADDER = ([("xl-resident", PINS["song_model"], "bfloat16", False, False),
 chosen = None
 for name, model, dtype, oc, od in LADDER:
     rung = dict(rung=name, model=model, dtype=dtype, offload_to_cpu=oc, offload_dit_to_cpu=od)
-    rc, found = cli_render(f"probe_{name}", render_conf(f"probe_{name}", 7001, rung, 2, MALE_REF), dtype)
+    rc, found = cli_render(f"probe_{name}", render_conf(f"probe_{name}", 7001, rung, 2, MALE_REF, LYRICS_VOC), dtype)
     if found:
         print(f"RUNG HELD: {name} — {model} @ {dtype}", flush=True); chosen = rung; break
 assert chosen, "no rung held"
@@ -224,36 +230,41 @@ def vocal_stem(mp3):
         f'--two-stems vocals -n htdemucs --shifts 0 --device cpu -o "{td}" "{norm}"'))
     return next(Path(td).rglob("vocals.wav"), None)
 
-# THE OPERATOR'S EAR OVERRULED THE INSTRUMENT (2026-09-09). Audition 1 scored the caption-only
-# takes "female"; the operator heard four MALE voices and picked caption6002 as the best. So the
-# caption-only arm — the arrangement free to be Persian — is the ONLY arm now, five seeds from the
-# one they chose, and NOTHING is discarded: the register read is disclosure, printed beside each
-# take with the note that it has been wrong on exactly this material.
-SEEDS = (6002, 6003, 6004, 6005, 6006)
+# THE VOWELS ARE THE EXPERIMENT (operator, 2026-09-10): the model sang 'e' wherever Persian
+# script leaves a short vowel unwritten (چِکِش، کِمِک، خِرد، بالاتِر). The same lyric is rendered in
+# two forms — every short vowel WRITTEN (harakat, as in children's books), and Latin
+# transliteration where every vowel is a letter — so the operator can hear which the model
+# honours. Caption only, no reference (their pick from audition 1 was caption-only); nothing is
+# discarded; the register read is disclosure with its caveat.
+ARMS = [("vocal", LYRICS_VOC, (6006, 6005, 6002)), ("latin", LYRICS_LAT, (6006, 6005))]
 report = []
-for seed in SEEDS:
-    name = f"caption{seed}"
-    t1 = time.time()
-    rc, found = cli_render(name, render_conf(name, seed, chosen, 80, None), chosen["dtype"])
-    assert found, f"{name}: no audio (rc {rc}) — {Path(f'/tmp/cli_{name}.txt').read_text(errors='replace')[-300:]}"
-    mp3 = OUT / f"{name}.mp3"
-    sh(f"ffmpeg -v error -i '{found[0]}' -codec:a libmp3lame -b:a 320k '{mp3}' -y")
-    row = {"arm": "caption", "seed": seed, "seconds": round(time.time()-t1), "reference": False}
-    try:
-        stem = vocal_stem(mp3)
-        reg = M.classify_f0(M.finite_f0(M.f0_yin(*M.load(str(stem), mono=True)))) if stem else {}
-        row.update(register_read=reg.get("register"), lead_hz=reg.get("lead_hz"),
-                   register_note="instrument read only — it called four male takes female in audition 1")
-        acc, heard = word_accuracy_fa(stem)
-        row.update(words_fa=round(acc, 3), heard=heard)
-        L = M.loudness(str(mp3)); row.update(lufs=L.get("lufs"), lra_lu=L.get("lra_lu"))
-    except Exception as e:                        # disclosure must never kill the audition
-        row["judge_error"] = str(e)[:200]
-    report.append(row)
-    (WORK / "audition.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(f"  {name}: register read {row.get('register_read')} · lead {row.get('lead_hz')} Hz · "
-          f"words(fa) {row.get('words_fa')} · {row['seconds']}s", flush=True)
-    clock(f"{name} done")
+for arm, lyric_form, seeds in ARMS:
+    for seed in seeds:
+        name = f"{arm}{seed}"
+        t1 = time.time()
+        rc, found = cli_render(name, render_conf(name, seed, chosen, 80, None, lyric_form), chosen["dtype"])
+        assert found, f"{name}: no audio (rc {rc}) — {Path(f'/tmp/cli_{name}.txt').read_text(errors='replace')[-300:]}"
+        mp3 = OUT / f"{name}.mp3"
+        sh(f"ffmpeg -v error -i '{found[0]}' -codec:a libmp3lame -b:a 320k '{mp3}' -y")
+        row = {"arm": arm, "seed": seed, "seconds": round(time.time()-t1), "reference": False,
+               "lyric_form": "vowel-marked Persian script" if arm == "vocal" else "Latin transliteration"}
+        try:
+            stem = vocal_stem(mp3)
+            reg = M.classify_f0(M.finite_f0(M.f0_yin(*M.load(str(stem), mono=True)))) if stem else {}
+            row.update(register_read=reg.get("register"), lead_hz=reg.get("lead_hz"),
+                       register_note="instrument read only — it called four male takes female in audition 1")
+            acc, heard = word_accuracy_fa(stem)
+            row.update(words_fa=round(acc, 3), heard=heard)
+            L = M.loudness(str(mp3)); row.update(lufs=L.get("lufs"), lra_lu=L.get("lra_lu"))
+        except Exception as e:                        # disclosure must never kill the audition
+            row["judge_error"] = str(e)[:200]
+        report.append(row)
+        (WORK / "audition.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(f"  {name}: register read {row.get('register_read')} · lead {row.get('lead_hz')} Hz · "
+              f"words(fa) {row.get('words_fa')} · {row['seconds']}s", flush=True)
+        clock(f"{name} done")
+(WORK / "lyrics_fa_vocalized.txt").write_text(LYRICS_VOC, encoding="utf-8")
+(WORK / "lyrics_fa_latin.txt").write_text(LYRICS_LAT, encoding="utf-8")
 (WORK / "caption.txt").write_text(CAPTION)
 (WORK / "lyrics_fa.txt").write_text(LYRICS, encoding="utf-8")
 print("AUDITION:", json.dumps(report, ensure_ascii=False), flush=True)

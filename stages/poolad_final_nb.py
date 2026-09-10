@@ -33,27 +33,27 @@ LYRICS = """[Intro]
 
 [Verse 1]
 تو کوره به دنیا اومدم
-زیر چکش، آب‌دیده شدم
-دستِ کمکِ هیچ‌کس رو ندیدم
-هر چی دارم، با خونِ دل خریدم
+زیر هزار ضربه آب‌دیده شدم
+تنها، بدون هیچ‌کس، قد کشیدم
+هر چی دارم، با خون دل خریدم
 
 [Chorus]
 من فولادم، آتیش تو خونمه
 روز و شب، همین آتیش تو جونمه
 خم بشم، دوباره بلند می‌شم
-چکش بزن، من خرد نمی‌شم
+هزار ضربه بزنن، له نمی‌شم
 
 [Verse 2]
 بندازم تو آب، گوش کن به صدام
 از تو بخار، محکم‌تر در می‌آم
-با انگشتت لبه‌مو تست کن، ببین
-واسه این تیزی، سال‌ها سوختم، همین
+لبه‌م تیزه، مثل برق آسمون
+سال‌ها سوختم واسه همین، بدون
 
 [Chorus]
 من فولادم، آتیش تو خونمه
 روز و شب، همین آتیش تو جونمه
 خم بشم، دوباره بلند می‌شم
-چکش بزن، من خرد نمی‌شم
+هزار ضربه بزنن، له نمی‌شم
 
 [Bridge]
 تیغ که بی‌کار بمونه، زنگ می‌گیره
@@ -64,16 +64,16 @@ LYRICS = """[Intro]
 [Instrumental Break]
 
 [Verse 3]
-شیپور که زدن، منو بکش بیرون
+میدون که صدام زد، منو بکش بیرون
 مال دستایی‌ام که ندیدمشون
-اونقدر بگیرم که دسته‌م صاف بشه
+اونقد بگیرم که دسته‌م صاف بشه
 تو سنگ می‌شی، راهم تموم نمی‌شه
 
 [Chorus]
 من فولادم، آتیش تو خونمه
 روز و شب، همین آتیش تو جونمه
 خم بشم، دوباره بلند می‌شم
-چکش بزن، من خرد نمی‌شم
+هزار ضربه بزنن، له نمی‌شم
 
 [Outro]
 من فولادم، آتیشو دیدم
@@ -82,27 +82,27 @@ GLOSS = """[Intro]
 
 [Verse 1]
 I was born in the furnace.
-Under the hammer, I got tempered.
-I never saw anyone's helping hand;
+Under a thousand blows, I got tempered.
+Alone, with no one at all, I grew tall;
 everything I have, I paid for in heart's blood.
 
 [Chorus]
 I'm steel — the fire's in my blood;
 day and night, that same fire's in my soul.
 If I bend, I get back up again;
-swing the hammer — I don't shatter.
+a thousand blows can land — I won't be crushed.
 
 [Verse 2]
 Throw me in the water, listen to my voice;
 out of the steam I come out stronger.
-Test my edge with your finger, look —
-for this sharpness I burned for years, that's all.
+My edge is sharp as lightning across the sky —
+I burned for years for this; know it.
 
 [Chorus]
 I'm steel — the fire's in my blood;
 day and night, that same fire's in my soul.
 If I bend, I get back up again;
-swing the hammer — I don't shatter.
+a thousand blows can land — I won't be crushed.
 
 [Bridge]
 A blade that sits idle gets rusty;
@@ -113,7 +113,7 @@ while my work remains, rusting is off-limits.
 [Instrumental Break]
 
 [Verse 3]
-When they sound the horn, pull me out;
+When the battlefield calls my name, pull me out;
 I belong to hands I've never seen.
 Hold me so long that my handle wears smooth —
 you'll turn to stone; my road doesn't end.
@@ -122,7 +122,7 @@ you'll turn to stone; my road doesn't end.
 I'm steel — the fire's in my blood;
 day and night, that same fire's in my soul.
 If I bend, I get back up again;
-swing the hammer — I don't shatter.
+a thousand blows can land — I won't be crushed.
 
 [Outro]
 I'm steel; I've seen the fire.
