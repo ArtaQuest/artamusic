@@ -8,7 +8,7 @@
 # proves itself with its own selftest before it is trusted), and the two generated inputs are
 # PUBLIC Kaggle notebooks mounted as data sources, linked in the provenance block:
 #
-#   * the song take: https://www.kaggle.com/code/ashranet/foolad-audition — the exact audio the
+#   * the song take: https://www.kaggle.com/code/ashraasn/foolad-quran — the exact audio the
 #     author approved by ear (every knob shown there: ACE-Step 1.5 XL sft at a pinned commit,
 #     the 1.7B structure planner, shift 1.0, 80 ODE steps, guidance 7.5, vocal language fa);
 #   * the cover: https://www.kaggle.com/code/artafather/steel-record-final — the LEGO forge loop
@@ -1009,10 +1009,10 @@ def clock(w): print(f"  ⏱ {w} · t+{(time.time()-T0)/60:.1f} min", flush=True)
 # Set on approval, from the audition's own measurements: the take the author chose by ear, and
 # the Persian word floor calibrated on that take (the English floor, 0.62, was calibrated on the
 # English take and says nothing about a Persian transcript).
-TAKE_NAME = "caption6002"
-WORDS_FLOOR = 0.62
+TAKE_NAME = "quran6005"
+WORDS_FLOOR = 0.45
 PROVENANCE = {
-    "song_take": f"https://www.kaggle.com/code/ashranet/foolad-audition ({TAKE_NAME})",
+    "song_take": f"https://www.kaggle.com/code/ashraasn/foolad-quran ({TAKE_NAME})",
     "cover":     "https://www.kaggle.com/code/artafather/steel-record-final",
     "tools":     "https://github.com/ArtaQuest/artamusic @ 199535aa (inlined above, verbatim)",
 }
@@ -1021,13 +1021,68 @@ sh("pip install -q demucs faster-whisper pyloudnorm soundfile 2>&1 | tail -1")
 clock("installed")
 
 TAKE = next(Path("/kaggle/input").rglob(f"*{TAKE_NAME}.mp3"), None)
-assert TAKE, "approved take not mounted (kernel source ashranet/foolad-audition)"
+assert TAKE, "approved take not mounted (kernel source ashraasn/foolad-quran)"
 COVER_DIR = None
 for p in Path("/kaggle/input").rglob("STEEL_cover_loop.mp4"):
     COVER_DIR = p.parent; break
 assert COVER_DIR, "cover not mounted (kernel source artafather/steel-record-final)"
 print(f"take: {TAKE}\ncover: {COVER_DIR}", flush=True)
 (OUT / "FOOLAD_lyrics_fa.txt").write_text(LYRICS + "\n", encoding="utf-8")
+# The form the singer was GIVEN — every vowel written the Quran way, so nothing was left to
+# guess (the author's instruction after hearing 'e' where 'a' and 'o' belonged). Stripping its
+# marks yields the plain lyric above; that equality is asserted rather than claimed (two
+# colloquial contractions are spelt as sung: لبم، دستم).
+LYRICS_SUNG = """[Intro]
+
+[Verse 1]
+تُو کُورِه بِه دُنْیَا اُومَدَمْ
+زِیرِ هِزَارْ ضَرْبِه آبْ‌دِیدِه شُدَمْ
+تَنْهَا، بِدُونِ هِیچْ‌کَسْ، قَدْ کِشِیدَمْ
+هَرْ چِی دَارَمْ، بَا خُونِ دِلْ خَرِیدَمْ
+
+[Chorus]
+مَنْ فُولَادَمْ، آتِیشْ تُو خُونَمِه
+رُوزْ وُ شَبْ، هَمِینْ آتِیشْ تُو جُونَمِه
+خَمْ بِشَمْ، دُوبَارِه بُلَنْدْ مِی‌شَمْ
+هِزَارْ ضَرْبِه بِزَنَنْ، لِه نِمِی‌شَمْ
+
+[Verse 2]
+بِنْدَازَمْ تُو آبْ، گُوشْ کُنْ بِه صِدَامْ
+اَزْ تُو بُخَارْ، مُحْکَمْ‌تَرْ دَرْ مِی‌آمْ
+لَبَمْ تِیزِه، مِثْلِ بَرْقِ آسِمُونْ
+سَالْ‌هَا سُوخْتَمْ وَاسِه هَمِینْ، بِدُونْ
+
+[Chorus]
+مَنْ فُولَادَمْ، آتِیشْ تُو خُونَمِه
+رُوزْ وُ شَبْ، هَمِینْ آتِیشْ تُو جُونَمِه
+خَمْ بِشَمْ، دُوبَارِه بُلَنْدْ مِی‌شَمْ
+هِزَارْ ضَرْبِه بِزَنَنْ، لِه نِمِی‌شَمْ
+
+[Bridge]
+تِیغْ کِه بِی‌کَارْ بِمُونِه، زَنْگْ مِی‌گِیرِه
+شَاهْ هَمْ بَا تَاجْ وُ تَخْتِشْ مِی‌مِیرِه
+زَنْگْ بِزَنَمْ، وَقْتِی کَارَمْ تَمُومِه
+تَا کَارَمْ مُونْدِه، زَنْگْ زَدَنْ حَرُومِه
+
+[Instrumental Break]
+
+[Verse 3]
+مِیدُونْ کِه صِدَامْ زَدْ، مَنُو بِکِشْ بِیرُونْ
+مَالِ دَسْتَایِی‌اَمْ کِه نَدِیدَمِشُونْ
+اُونْقَدْ بِگِیرَمْ کِه دَسْتَمْ صَافْ بِشِه
+تُو سَنْگْ مِی‌شِی، رَاهَمْ تَمُومْ نِمِی‌شِه
+
+[Chorus]
+مَنْ فُولَادَمْ، آتِیشْ تُو خُونَمِه
+رُوزْ وُ شَبْ، هَمِینْ آتِیشْ تُو جُونَمِه
+خَمْ بِشَمْ، دُوبَارِه بُلَنْدْ مِی‌شَمْ
+هِزَارْ ضَرْبِه بِزَنَنْ، لِه نِمِی‌شَمْ
+
+[Outro]
+مَنْ فُولَادَمْ، آتِیشُو دِیدَمْ
+بَا هَرْ ضَرْبِه، بَالَاتَرْ پَرِیدَمْ"""
+assert _re.sub(r"[ً-ْٰ]", "", LYRICS_SUNG) == LYRICS.replace("لبه‌م", "لبم").replace("دسته‌م", "دستم"), "sung form must strip to the plain lyric"
+(OUT / "FOOLAD_lyrics_fa_vocalized.txt").write_text(LYRICS_SUNG + "\n", encoding="utf-8")
 (OUT / "FOOLAD_lyrics_gloss_en.txt").write_text(GLOSS + "\n", encoding="utf-8")
 clock("inputs proven")
 
