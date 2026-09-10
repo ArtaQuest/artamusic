@@ -66,8 +66,13 @@ print("expected short-vowel mix:", dict(Counter(v for v in EXP if v in "aeo")), 
 
 # %%
 # HEARD VOWELS: the phone recogniser on the separated stem, 20 s windows, greedy CTC decode.
-from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
-proc = Wav2Vec2Processor.from_pretrained(PINS["phone_model"]); model = Wav2Vec2ForCTC.from_pretrained(PINS["phone_model"]).eval()
+# The combined Processor refuses this model under transformers 4.5x ("Received a bool for argument
+# tokenizer"); its two halves load fine on their own — the phoneme CTC tokenizer decodes the ids,
+# the feature extractor normalises the audio.
+from transformers import Wav2Vec2ForCTC, Wav2Vec2FeatureExtractor, Wav2Vec2PhonemeCTCTokenizer
+fe = Wav2Vec2FeatureExtractor.from_pretrained(PINS["phone_model"])
+tok = Wav2Vec2PhonemeCTCTokenizer.from_pretrained(PINS["phone_model"])
+model = Wav2Vec2ForCTC.from_pretrained(PINS["phone_model"]).eval()
 VOWEL_CLASS = [("ɒː", "A"), ("ɑː", "A"), ("aː", "A"), ("ɒ", "A"), ("ɑ", "A"),
                ("iː", "i"), ("uː", "u"), ("ɛ", "e"), ("e", "e"), ("æ", "a"), ("a", "a"), ("ɔ", "o"), ("o", "o"), ("i", "i"), ("u", "u")]
 def heard_vowels(stem):
@@ -82,9 +87,9 @@ def heard_vowels(stem):
         seg = x[s0:s0 + win]
         if len(seg) < sr: continue
         with torch.no_grad():
-            logits = model(**proc(seg, sampling_rate=sr, return_tensors="pt")).logits
+            logits = model(**fe(seg, sampling_rate=sr, return_tensors="pt")).logits
         ids = torch.argmax(logits, dim=-1)[0].tolist()
-        phones += [p for p in proc.batch_decode([ids])[0].split() if p]
+        phones += [p for p in tok.decode(ids).split() if p]
     vowels = []
     for p in phones:
         for tok, cls in VOWEL_CLASS:
