@@ -66,13 +66,25 @@ print("expected short-vowel mix:", dict(Counter(v for v in EXP if v in "aeo")), 
 
 # %%
 # HEARD VOWELS: the phone recogniser on the separated stem, 20 s windows, greedy CTC decode.
-# The combined Processor refuses this model under transformers 4.5x ("Received a bool for argument
-# tokenizer"); its two halves load fine on their own — the phoneme CTC tokenizer decodes the ids,
-# the feature extractor normalises the audio.
-from transformers import Wav2Vec2ForCTC, Wav2Vec2FeatureExtractor, Wav2Vec2PhonemeCTCTokenizer
+# No tokenizer class at all: on Kaggle's transformers the phoneme tokenizer for this model loads
+# as `False` (and the combined Processor then complains of "a bool for argument tokenizer"). Ids
+# become phone labels through the model's own vocab.json and a greedy CTC decode — collapse
+# repeats, drop the blank — which is all the tokenizer would have done.
+from transformers import Wav2Vec2ForCTC, Wav2Vec2FeatureExtractor
+from huggingface_hub import hf_hub_download
 fe = Wav2Vec2FeatureExtractor.from_pretrained(PINS["phone_model"])
-tok = Wav2Vec2PhonemeCTCTokenizer.from_pretrained(PINS["phone_model"])
 model = Wav2Vec2ForCTC.from_pretrained(PINS["phone_model"]).eval()
+VOCAB = json.loads(Path(hf_hub_download(PINS["phone_model"], "vocab.json")).read_text(encoding="utf-8"))
+ID2PHONE = {v: k for k, v in VOCAB.items()}
+SPECIAL = {i for t, i in VOCAB.items() if t.startswith("<") or t in ("|",)}
+BLANK = VOCAB.get("<pad>", 0)
+def ctc_decode(ids):
+    out, prev = [], None
+    for i in ids:
+        if i != prev and i != BLANK and i not in SPECIAL: out.append(ID2PHONE[i])
+        prev = i
+    return out
+print(f"phone vocab {len(VOCAB)} · blank id {BLANK}", flush=True)
 VOWEL_CLASS = [("ɒː", "A"), ("ɑː", "A"), ("aː", "A"), ("ɒ", "A"), ("ɑ", "A"),
                ("iː", "i"), ("uː", "u"), ("ɛ", "e"), ("e", "e"), ("æ", "a"), ("a", "a"), ("ɔ", "o"), ("o", "o"), ("i", "i"), ("u", "u")]
 def heard_vowels(stem):
@@ -89,7 +101,7 @@ def heard_vowels(stem):
         with torch.no_grad():
             logits = model(**fe(seg, sampling_rate=sr, return_tensors="pt")).logits
         ids = torch.argmax(logits, dim=-1)[0].tolist()
-        phones += [p for p in tok.decode(ids).split() if p]
+        phones += ctc_decode(ids)
     vowels = []
     for p in phones:
         for pref, cls in VOWEL_CLASS:          # not `tok`: that name is the tokenizer above
