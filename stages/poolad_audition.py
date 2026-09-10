@@ -32,7 +32,7 @@ PINS = {
     "song_model": "acestep-v15-xl-sft",
     "planner": "acestep-5Hz-lm-1.7B",   # the approved take's planner (ACE-Step's default); the 4B does not fit a T4 beside the XL
     "measure_sha": "199535aa517324d8021667b5a34a799aedd19353",     # ArtaQuest/artamusic lib/measure.py
-    "lyric_sha": "3e742ca16c3c26171551e18500d6061612f15188",   # ArtaQuest/artamusic song/lyrics_foolad_fa.txt
+    "lyric_sha": "6db0f5f3c73323d1fedd1715d9feaae3959522fc",   # ArtaQuest/artamusic song/lyrics_foolad_fa.txt
     "torch_pascal": "2.7.1", "cuda_line_pascal": "cu126",
     "asr": "large-v3",
 }
@@ -72,7 +72,7 @@ urllib.request.urlretrieve(
     f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['measure_sha']}/lib/measure.py",
     "/tmp/measure.py")
 for _f, _to in (("lyrics_foolad_fa.txt", "/tmp/lyrics_fa.txt"),
-                ("lyrics_foolad_fa.vocalized.txt", "/tmp/lyrics_fa_voc.txt"),
+                ("lyrics_foolad_fa.quran.txt", "/tmp/lyrics_fa_voc.txt"),
                 ("lyrics_foolad_fa.latin.txt", "/tmp/lyrics_fa_lat.txt")):
     urllib.request.urlretrieve(
         f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['lyric_sha']}/song/{_f}", _to)
@@ -81,10 +81,12 @@ import numpy as np, torch
 a = torch.randn(256, 256, device="cuda"); assert torch.isfinite(a @ a).all(), "CUDA matmul failed — wrong torch for this card"
 import measure as M
 LYRICS = Path("/tmp/lyrics_fa.txt").read_text(encoding="utf-8").strip()          # plain: the judge's reference
-LYRICS_VOC = Path("/tmp/lyrics_fa_voc.txt").read_text(encoding="utf-8").strip()  # every short vowel written
+LYRICS_VOC = Path("/tmp/lyrics_fa_voc.txt").read_text(encoding="utf-8").strip()  # FULLY vocalized, Quran-style
 LYRICS_LAT = Path("/tmp/lyrics_fa_lat.txt").read_text(encoding="utf-8").strip()  # Latin transliteration
 assert LYRICS.startswith("[Intro]") and "من فولادم" in LYRICS, "wrong lyric at pin"
-assert re.sub(r"[ً-ْٰ]", "", LYRICS_VOC) == LYRICS, "the vocalized text must be the plain text plus marks"
+# the fully vocalized text writes two contractions as they are SUNG (لبم/دستم), so compare on that
+assert re.sub(r"[ً-ْٰ]", "", LYRICS_VOC) == LYRICS.replace("لبه\u200cم", "لبم").replace("دسته\u200cم", "دستم"), \
+    "the vocalized text must be the sung lyric plus marks"
 assert "Man fooladam" in LYRICS_LAT
 _ref = sorted(Path("/kaggle/input").rglob("STEEL.mp3"))
 assert _ref, "the STEEL lead is not mounted (kernel source artafather/steel-record-final)"
@@ -236,7 +238,7 @@ def vocal_stem(mp3):
 # transliteration where every vowel is a letter — so the operator can hear which the model
 # honours. Caption only, no reference (their pick from audition 1 was caption-only); nothing is
 # discarded; the register read is disclosure with its caveat.
-ARMS = [("vocal", LYRICS_VOC, (6006, 6005, 6002)), ("latin", LYRICS_LAT, (6006, 6005))]
+ARMS = [("quran", LYRICS_VOC, (6006, 6005, 6002)), ("latin", LYRICS_LAT, (6006, 6005))]
 report = []
 for arm, lyric_form, seeds in ARMS:
     for seed in seeds:
@@ -247,7 +249,7 @@ for arm, lyric_form, seeds in ARMS:
         mp3 = OUT / f"{name}.mp3"
         sh(f"ffmpeg -v error -i '{found[0]}' -codec:a libmp3lame -b:a 320k '{mp3}' -y")
         row = {"arm": arm, "seed": seed, "seconds": round(time.time()-t1), "reference": False,
-               "lyric_form": "vowel-marked Persian script" if arm == "vocal" else "Latin transliteration"}
+               "lyric_form": "fully vocalized Persian (Quran-style)" if arm == "quran" else "Latin transliteration"}
         try:
             stem = vocal_stem(mp3)
             reg = M.classify_f0(M.finite_f0(M.f0_yin(*M.load(str(stem), mono=True)))) if stem else {}
