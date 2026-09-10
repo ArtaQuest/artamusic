@@ -14,39 +14,56 @@ import argparse, base64, html, json, subprocess, tempfile
 from pathlib import Path
 
 ap = argparse.ArgumentParser()
-ap.add_argument("run"); ap.add_argument("out")
+ap.add_argument("run", nargs="+", help="one or more run dirs; their takes are pooled onto one page")
+ap.add_argument("out")
 ap.add_argument("--lyric", required=True); ap.add_argument("--gloss")
 ap.add_argument("--title", default="پولاد"); ap.add_argument("--subtitle", default="")
 ap.add_argument("--rig", help="json of label→value rows for the rig table")
 ap.add_argument("--caption")
+ap.add_argument("--heard", help="the operator's own register verdict for every take (e.g. male) — the ear is the authority; the instrument's read is shown beside it")
 a = ap.parse_args()
-RUN, OUT = Path(a.run), Path(a.out)
+RUNS, OUT = [Path(r) for r in a.run], Path(a.out)
 
-rows = json.loads((RUN / "audition.json").read_text(encoding="utf-8"))
+rows, ROW_RUN = [], {}
+for _r in RUNS:
+    for _row in json.loads((_r / "audition.json").read_text(encoding="utf-8")):
+        key = f"{_row['arm']}{_row['seed']}"
+        if key in ROW_RUN:            # same arm+seed in two runs: keep the first, name the clash
+            key = f"{key}@{_r.name}"; _row = dict(_row, arm=f"{_row['arm']}·{_r.name}")
+        ROW_RUN[key] = _r; rows.append(_row)
+print(f"{len(rows)} takes from {len(RUNS)} run(s)")
 lyric = Path(a.lyric).read_text(encoding="utf-8").splitlines()
 gloss = Path(a.gloss).read_text(encoding="utf-8").splitlines() if a.gloss else [""] * len(lyric)
 assert len(gloss) == len(lyric), "gloss must align line for line with the lyric"
 rig = json.loads(Path(a.rig).read_text()) if a.rig else {}
 caption = Path(a.caption).read_text().strip() if a.caption else (RUN / "caption.txt").read_text().strip() if (RUN / "caption.txt").exists() else ""
 
-def mp3_uri(path, kbps):
+def mp3_uri(path, kbps, mono=False):
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td) / "t.mp3"
-        subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-codec:a", "libmp3lame", "-b:a", f"{kbps}k", str(tmp), "-y"], check=True)
+        cmd = ["ffmpeg", "-v", "error", "-i", str(path), "-codec:a", "libmp3lame", "-b:a", f"{kbps}k"]
+        if mono: cmd += ["-ac", "1"]
+        subprocess.run(cmd + [str(tmp), "-y"], check=True)
         return "data:audio/mpeg;base64," + base64.b64encode(tmp.read_bytes()).decode()
 
 takes = []
 for r in rows:
-    name = f"{r['arm']}{r['seed']}"
-    mp3 = RUN / "out" / f"{name}.mp3"
-    takes.append((name, r, mp3 if mp3.exists() else None))
+    label = f"{r['arm']}{r['seed']}"
+    base = label.split("@")[0].replace("·" + ROW_RUN.get(label, Path('.')).name, "")
+    run = ROW_RUN.get(label, RUNS[0])
+    mp3 = run / "out" / f"{base}.mp3"
+    if not mp3.exists():                      # arm was renamed for a clash — try the plain name
+        mp3 = run / "out" / f"{r['arm'].split('·')[0]}{r['seed']}.mp3"
+    takes.append((label, r, mp3 if mp3.exists() else None))
 
-for kbps in (128, 96, 80):
-    audio = {n: (mp3_uri(p, kbps) if p else "") for n, _, p in takes}
+# Stereo first; mono and lower bitrates only as far as the 16 MB artifact ceiling forces. A
+# comparison page exists to be LISTENED to, so quality is spent before quantity.
+for kbps, mono in ((128, False), (96, False), (80, False), (96, True), (72, True), (56, True), (44, True)):
+    audio = {n: (mp3_uri(p, kbps, mono) if p else "") for n, _, p in takes}
     total = sum(len(v) for v in audio.values())
     if total < 14_500_000:
         break
-print(f"audio at {kbps} kbps · {total/1e6:.1f} MB embedded")
+print(f"audio at {kbps} kbps {'mono' if mono else 'stereo'} · {total/1e6:.1f} MB embedded")
 
 def esc(s): return html.escape(str(s if s is not None else "—"))
 def num(v, f="{:.1f}"): return "—" if v is None else f.format(v)
@@ -66,7 +83,9 @@ for b in blocks:
 
 take_html = []
 for name, r, p in takes:
-    reg = r.get("register") or "—"
+    read = r.get("register") or r.get("register_read") or "—"
+    reg = a.heard or read
+    reg_label = (f"{a.heard} · read {read}" if a.heard and read != a.heard else reg)
     words = r.get("words_fa"); wpct = "—" if words is None else f"{words*100:.0f}%"
     arm = r.get("arm"); anchored = r.get("reference")
     take_html.append(f'''
@@ -74,7 +93,7 @@ for name, r, p in takes:
   <header>
     <span class="arm {esc(arm)}">{esc(arm)}</span>
     <h2>seed {esc(r.get("seed"))}</h2>
-    <span class="reg {esc(reg)}">{esc(reg)}</span>
+    <span class="reg {esc(reg)}" title="{esc('the operator heard ' + a.heard + '; the instrument read ' + read) if a.heard else 'instrument read'}">{esc(reg_label)}</span>
   </header>
   <p class="how">{"conditioned on the STEEL lead" if anchored else "caption only — no reference"}</p>
   <audio controls preload="metadata" src="{audio.get(name, "")}"></audio>
@@ -85,6 +104,7 @@ for name, r, p in takes:
     <div><dt>range</dt><dd>{num(r.get("lra_lu"))} LU</dd></div>
     <div><dt>render</dt><dd>{num(r.get("seconds"), "{:.0f}")} s</dd></div>
   </dl>
+  {f'<p class="form">{esc(r.get("lyric_form"))}</p>' if r.get("lyric_form") else ""}
   {f'<details><summary>what the judge heard</summary><p class="heard" lang="fa" dir="rtl">{esc(r.get("heard"))}</p></details>' if r.get("heard") else ""}
   {f'<p class="err">{esc(r.get("judge_error"))}</p>' if r.get("judge_error") else ""}
 </article>''')
@@ -124,6 +144,7 @@ h1,h2,h3 {{ margin:0; text-wrap:balance }}
 .reg {{ font:600 11px/1 "IBM Plex Sans", sans-serif; letter-spacing:.1em; text-transform:uppercase; padding:6px 9px; border-radius:999px; border:1px solid currentColor }}
 .reg.male {{ color:var(--male) }} .reg.female {{ color:var(--female) }} .reg.— {{ color:var(--ink-3) }}
 .how {{ margin:0; color:var(--ink-3); font-size:13px }}
+.form {{ margin:0; font-size:12px; font-weight:600; color:var(--gold) }}
 audio {{ width:100%; height:40px; border-radius:999px; }}
 .stats {{ display:grid; grid-template-columns:repeat(5, 1fr); gap:8px; margin:0 }}
 .stats div {{ display:grid; gap:2px }}
