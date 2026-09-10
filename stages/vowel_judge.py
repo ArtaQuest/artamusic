@@ -21,14 +21,13 @@ PINS = {
     "phone_model": "facebook/wav2vec2-xlsr-53-espeak-cv-ft",   # CTC phone recogniser, espeak phone set, 60+ languages incl. fa
     "measure_sha": "199535aa517324d8021667b5a34a799aedd19353",
     "lyric_sha": "fd562d46256d69afb92e4c0f32744e7b9407ba8e",
-    "vocalized_file": "lyrics_foolad_fa.v3.vocalized.txt",
 }
 WORK = Path("/kaggle/working"); OUT = WORK / "out"; OUT.mkdir(parents=True, exist_ok=True)
 PY = sys.executable
 sh(f"{PY} -m pip install -q 'demucs>=4.0.1' pyloudnorm soundfile 'transformers>=4.51.0,<4.58.0' phonemizer 2>&1 | tail -1")
 import urllib.request
 urllib.request.urlretrieve(f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['measure_sha']}/lib/measure.py", "/tmp/measure.py")
-urllib.request.urlretrieve(f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['lyric_sha']}/song/{PINS['vocalized_file']}", "/tmp/voc.txt")
+urllib.request.urlretrieve(f"https://raw.githubusercontent.com/ArtaQuest/artamusic/{PINS['lyric_sha']}/song/lyrics_foolad_fa.v3.vocalized.txt", "/tmp/voc.txt")
 sys.path.insert(0, "/tmp")
 import numpy as np, torch, soundfile as sf
 import measure as M
