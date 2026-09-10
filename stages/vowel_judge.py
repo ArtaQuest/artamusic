@@ -92,8 +92,8 @@ def heard_vowels(stem):
         phones += [p for p in tok.decode(ids).split() if p]
     vowels = []
     for p in phones:
-        for tok, cls in VOWEL_CLASS:
-            if p.startswith(tok): vowels.append(cls); break
+        for pref, cls in VOWEL_CLASS:          # not `tok`: that name is the tokenizer above
+            if p.startswith(pref): vowels.append(cls); break
     return phones, vowels
 
 def align_counts(exp, got):
