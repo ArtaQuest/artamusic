@@ -36,7 +36,11 @@ lyric = Path(a.lyric).read_text(encoding="utf-8").splitlines()
 gloss = Path(a.gloss).read_text(encoding="utf-8").splitlines() if a.gloss else [""] * len(lyric)
 assert len(gloss) == len(lyric), "gloss must align line for line with the lyric"
 rig = json.loads(Path(a.rig).read_text()) if a.rig else {}
-caption = Path(a.caption).read_text().strip() if a.caption else (RUN / "caption.txt").read_text().strip() if (RUN / "caption.txt").exists() else ""
+def _first_caption():
+    for r in RUNS:
+        if (r / "caption.txt").exists(): return (r / "caption.txt").read_text().strip()
+    return ""
+caption = Path(a.caption).read_text().strip() if a.caption else _first_caption()
 
 def mp3_uri(path, kbps, mono=False):
     with tempfile.TemporaryDirectory() as td:
